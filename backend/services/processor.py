@@ -7,43 +7,54 @@ from backend.services.ffmpeg import (
 )
 
 
-def inspect_video(video_path: str | Path) -> dict:
+def inspect_video(
+    video_path,
+):
 
-    video_path = Path(video_path)
+    path = Path(video_path)
 
-    if not video_path.exists():
+    if not path.exists():
+
         raise FileNotFoundError(
-            f"Video not found: {video_path}"
+            f"Video not found: {path}"
         )
 
     if not ffmpeg_available():
+
         return {
             "success": False,
-            "error": "FFmpeg is not installed"
+            "error": "FFmpeg is not installed",
         }
 
-    duration = get_duration(video_path)
-
-    return {
-        "success": True,
-        "filename": video_path.name,
-        "duration": duration,
-        "duration_seconds": round(duration, 2),
-    }
-
-
-def prepare_audio(video_path: str | Path) -> dict:
-
-    video_path = Path(video_path)
-
-    audio_name = f"{video_path.stem}.wav"
-
-    audio_path = extract_audio(
-        video_path,
-        audio_name
+    duration = get_duration(
+        path
     )
 
     return {
         "success": True,
-        "audio_file": str(audio_path)
+        "filename": path.name,
+        "duration": duration,
+        "duration_seconds": round(
+            duration,
+            2,
+        ),
+    }
+
+
+def prepare_audio(
+    video_path,
+):
+
+    path = Path(video_path)
+
+    audio_path = extract_audio(
+        path,
+        f"{path.stem}.wav",
+    )
+
+    return {
+        "success": True,
+        "audio_file": str(
+            audio_path
+        ),
     }
