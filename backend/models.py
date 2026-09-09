@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -11,7 +11,12 @@ from sqlalchemy import (
 from .database import Base
 
 
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
 class Job(Base):
+
     __tablename__ = "jobs"
 
     id = Column(
@@ -71,14 +76,14 @@ class Job(Base):
     )
 
     created_at = Column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
         nullable=False,
+        default=utcnow,
     )
 
     updated_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
         nullable=False,
+        default=utcnow,
+        onupdate=utcnow,
     )
