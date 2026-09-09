@@ -1,54 +1,33 @@
 from pathlib import Path
 
 
-def create_srt(
-    segments: list,
-    output_path: str | Path
-) -> Path:
+def format_timestamp(
+    seconds,
+):
 
-    output_path = Path(output_path)
-
-    lines = []
-
-    for index, segment in enumerate(
-        segments,
-        start=1
-    ):
-        start = segment.get("start", 0)
-        end = segment.get("end", start + 2)
-        text = segment.get("text", "").strip()
-
-        if not text:
-            continue
-
-        lines.append(
-            f"{index}\n"
-            f"{format_timestamp(start)} --> "
-            f"{format_timestamp(end)}\n"
-            f"{text}\n"
-        )
-
-    output_path.write_text(
-        "\n".join(lines),
-        encoding="utf-8"
+    seconds = max(
+        0.0,
+        float(seconds),
     )
 
-    return output_path
-
-
-def format_timestamp(seconds: float) -> str:
-
-    seconds = max(0, float(seconds))
-
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    milliseconds = int(
-        round((seconds - int(seconds)) * 1000)
+    total_ms = int(
+        round(seconds * 1000)
     )
 
-    if milliseconds >= 1000:
-        milliseconds = 999
+    hours, remainder = divmod(
+        total_ms,
+        3600000,
+    )
+
+    minutes, remainder = divmod(
+        remainder,
+        60000,
+    )
+
+    secs, milliseconds = divmod(
+        remainder,
+        1000,
+    )
 
     return (
         f"{hours:02d}:"
@@ -56,3 +35,61 @@ def format_timestamp(seconds: float) -> str:
         f"{secs:02d},"
         f"{milliseconds:03d}"
     )
+
+
+def create_srt(
+    segments,
+    output_path,
+):
+
+    output_path = Path(
+        output_path
+    )
+
+    blocks = []
+
+    number = 1
+
+    for segment in segments:
+
+        text = (
+            segment
+            .get("text", "")
+            .strip()
+        )
+
+        if not text:
+            continue
+
+        start = float(
+            segment.get(
+                "start",
+                0,
+            )
+        )
+
+        end = max(
+            start + 0.5,
+            float(
+                segment.get(
+                    "end",
+                    start + 2,
+                )
+            ),
+        )
+
+        blocks.append(
+            f"{number}\n"
+            f"{format_timestamp(start)} --> "
+            f"{format_timestamp(end)}\n"
+            f"{text}\n"
+        )
+
+        number += 1
+
+    output_path.write_text(
+        "\n".join(blocks),
+        encoding="utf-8",
+    )
+
+    return output_path
