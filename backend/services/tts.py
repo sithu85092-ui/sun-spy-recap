@@ -3,60 +3,91 @@ import asyncio
 import edge_tts
 
 
-DEFAULT_VOICE = "my-MM-NilarNeural"
+VOICES = [
+    "my-MM-NilarNeural",
+    "my-MM-ThihaNeural",
+    "en-US-JennyNeural",
+]
 
 
 async def synthesize(
     text,
     output_path,
-    voice=DEFAULT_VOICE,
+    voice=None,
 ):
     text = (text or "").strip()
 
     if not text:
-        raise ValueError("Narration text is empty")
+        raise ValueError(
+            "Narration text is empty"
+        )
 
     output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Try Burmese voice first, then fallback voices.
-    voices = [
-        voice,
-        "my-MM-ThihaNeural",
-        "en-US-JennyNeural",
-    ]
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    # If a specific voice was requested,
+    # try it first.
+    voices = []
+
+    if voice:
+        voices.append(voice)
+
+    for item in VOICES:
+        if item not in voices:
+            voices.append(item)
 
     last_error = None
 
-    for current_voice in voices:
-        for attempt in range(3):
+    for selected_voice in voices:
+
+        for attempt in range(1, 4):
+
             try:
+
+                # Remove broken previous output
                 if output_path.exists():
                     output_path.unlink()
 
-                communicator = edge_tts.Communicate(
-                    text,
-                    current_voice,
+                communicator = (
+                    edge_tts.Communicate(
+                        text,
+                        selected_voice
+                    )
                 )
 
                 await communicator.save(
                     str(output_path)
                 )
 
-                # Make sure audio file was actually created.
-                if output_path.exists() and output_path.stat().st_size > 1000:
+                # Validate generated audio
+                if (
+                    output_path.exists()
+                    and output_path.stat().st_size > 1000
+                ):
                     return output_path
 
                 raise RuntimeError(
-                    f"TTS produced an empty audio file using {current_voice}"
+                    "Generated audio file is empty."
                 )
 
             except Exception as error:
+
                 last_error = error
 
-                # Wait before retry.
-                await asyncio.sleep(2 * (attempt + 1))
+                print(
+                    f"TTS failed: "
+                    f"voice={selected_voice}, "
+                    f"attempt={attempt}, "
+                    f"error={error}"
+                )
+
+                await asyncio.sleep(2)
 
     raise RuntimeError(
-        f"TTS failed after retries: {last_error}"
+        "Burmese AI voice generation failed. "
+        f"Last error: {last_error}"
     )
