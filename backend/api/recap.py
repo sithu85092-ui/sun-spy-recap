@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -6,6 +7,7 @@ from pydantic import BaseModel
 
 from backend.config import UPLOAD_DIR
 from backend.database import create_job
+from backend.workers.video_worker import process_video
 
 
 router = APIRouter(
@@ -43,9 +45,14 @@ async def create_recap(request: RecapRequest):
         created_at=now
     )
 
+    # Start background processing
+    asyncio.create_task(
+        process_video(job_id)
+    )
+
     return {
         "success": True,
         "job_id": job_id,
         "status": "QUEUED",
-        "message": "Recap job created successfully"
+        "message": "Recap processing started."
     }
