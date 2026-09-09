@@ -13,9 +13,7 @@ from backend.api.files import router as files_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
     init_database()
-
     yield
 
 
@@ -27,6 +25,7 @@ app = FastAPI(
 )
 
 
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,29 +36,24 @@ app.add_middleware(
 
 
 # API Routers
-
 app.include_router(upload_router)
-
 app.include_router(jobs_router)
-
 app.include_router(recap_router)
-
 app.include_router(files_router)
 
 
 @app.get("/")
 async def root():
-
     return {
         "name": "SUN SPY RECAP",
         "version": "1.0.0",
+        "status": "online",
         "message": "Upload • Discover • Recap",
     }
 
 
 @app.get("/api/health")
 async def health():
-
     return {
         "status": "ok",
         "service": "SUN SPY RECAP API",
