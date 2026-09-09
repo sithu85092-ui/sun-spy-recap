@@ -1,159 +1,195 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+<meta charset="UTF-8">
 
-    <title>SUN SPY RECAP</title>
+<meta
+name="viewport"
+content="width=device-width, initial-scale=1.0">
 
-    <link
-        rel="stylesheet"
-        href="style.css"
-    >
+<title>SUN SPY RECAP</title>
+
+<link
+rel="stylesheet"
+href="style.css">
+
 </head>
 
 <body>
 
-    <main class="app">
+<main class="app">
 
-        <header class="header">
+<header class="header">
 
-            <div class="brand">
-                <span class="logo">☀️</span>
+<div class="brand">
 
-                <div>
-                    <h1>SUN SPY RECAP</h1>
-                    <p>Upload • Discover • Recap</p>
-                </div>
-            </div>
+<span class="logo">☀️</span>
 
-        </header>
+<div>
 
+<h1>SUN SPY RECAP</h1>
 
-        <section class="hero">
+<p>AI Video → Short Recap</p>
 
-            <h2>
-                Turn your videos into
-                <span>short recaps.</span>
-            </h2>
+</div>
 
-            <p>
-                Upload a video and let SUN SPY RECAP
-                discover the most interesting moments.
-            </p>
+</div>
 
-        </section>
+</header>
 
 
-        <section class="upload-card">
+<section class="hero">
 
-            <div
-                id="dropZone"
-                class="drop-zone"
-            >
+<div class="badge">
+AI VIDEO RECAP
+</div>
 
-                <div class="upload-icon">
-                    🎬
-                </div>
+<h2>
+Turn long videos into
+<span>short recaps.</span>
+</h2>
 
-                <h3>
-                    Drop your video here
-                </h3>
+<p>
+Upload a video and let SUN SPY find a highlight,
+create a recap, generate Burmese voice,
+add subtitles and render a 9:16 short.
+</p>
 
-                <p>
-                    or select a video from your device
-                </p>
-
-                <button
-                    id="selectButton"
-                    type="button"
-                >
-                    Select Video
-                </button>
-
-                <input
-                    id="videoInput"
-                    type="file"
-                    accept="video/*"
-                    hidden
-                >
-
-            </div>
+</section>
 
 
-            <div
-                id="fileInfo"
-                class="file-info hidden"
-            ></div>
+<section class="upload-card">
+
+<div
+id="dropZone"
+class="drop-zone">
+
+<div class="upload-icon">
+🎬
+</div>
+
+<h3>
+Drop your video here
+</h3>
+
+<p>
+or select a video from your device
+</p>
+
+<button
+id="selectButton"
+type="button">
+Select Video
+</button>
+
+<input
+id="videoInput"
+type="file"
+accept="video/*"
+hidden>
+
+</div>
 
 
-            <div
-                id="progressContainer"
-                class="progress-container hidden"
-            >
-
-                <div class="progress-header">
-                    <span id="progressText">
-                        Uploading...
-                    </span>
-
-                    <span id="progressPercent">
-                        0%
-                    </span>
-                </div>
-
-                <div class="progress-bar">
-                    <div
-                        id="progressBar"
-                        class="progress"
-                    ></div>
-                </div>
-
-            </div>
+<div
+id="fileInfo"
+class="file-info hidden">
+</div>
 
 
-            <div
-                id="statusBox"
-                class="status-box hidden"
-            ></div>
+<div
+id="progressContainer"
+class="progress-container hidden">
 
-        </section>
+<div class="progress-header">
 
+<span id="progressText">
+Preparing...
+</span>
 
-        <section
-            id="resultSection"
-            class="result-section hidden"
-        >
+<span id="progressPercent">
+0%
+</span>
 
-            <h2>
-                Your Recap
-            </h2>
+</div>
 
-            <video
-                id="resultVideo"
-                controls
-                playsinline
-            ></video>
+<div class="progress-bar">
 
-        </section>
+<div
+id="progressBar"
+class="progress">
+</div>
 
+</div>
 
-        <footer>
-
-            <p>
-                © 2026 SUN SPY RECAP
-            </p>
-
-        </footer>
-
-    </main>
+</div>
 
 
-    <script src="app.js"></script>
+<div
+id="statusBox"
+class="status-box hidden">
+</div>
+
+</section>
+
+
+<section
+id="resultSection"
+class="result-section hidden">
+
+<div class="result-header">
+
+<div>
+
+<div class="badge">
+READY
+</div>
+
+<h2>
+Your Recap
+</h2>
+
+</div>
+
+<a
+id="downloadButton"
+class="download"
+href="#"
+download>
+Download MP4
+</a>
+
+</div>
+
+
+<video
+id="resultVideo"
+controls
+playsinline>
+</video>
+
+
+<div
+id="recapText"
+class="recap-text">
+</div>
+
+</section>
+
+
+<footer>
+
+© 2026 SUN SPY RECAP
+
+</footer>
+
+</main>
+
+
+<script src="app.js"></script>
 
 </body>
+
 </html>
