@@ -339,4 +339,39 @@ footer {
         text-align: center;
     }
 
+    .select-video-button {
+    display: inline-block;
+    background: #ffffff;
+    color: #08090c;
+    border: 0;
+    border-radius: 12px;
+    padding: 13px 22px;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    text-decoration: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.select-video-button:active {
+    transform: scale(0.97);
+}
+
+.input-preview-container {
+    margin-top: 20px;
+    width: 100%;
+}
+
+.input-preview-container video {
+    width: 100%;
+    max-height: 420px;
+    display: block;
+    border-radius: 16px;
+    background: #000;
+    object-fit: contain;
+}
+
 }
