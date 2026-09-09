@@ -1,16 +1,29 @@
 from pathlib import Path
 
+from faster_whisper import WhisperModel
+
 
 class TranscriptionEngine:
-    """
-    Speech-to-text engine.
 
-    The actual Whisper/open-source model can be
-    connected here later without changing the API.
-    """
+    def __init__(
+        self,
+        model_size: str = "tiny"
+    ):
 
-    def __init__(self):
+        self.model_size = model_size
         self.model = None
+
+    def load_model(self):
+
+        if self.model is None:
+
+            self.model = WhisperModel(
+                self.model_size,
+                device="cpu",
+                compute_type="int8"
+            )
+
+        return self.model
 
     def transcribe(
         self,
@@ -24,16 +37,44 @@ class TranscriptionEngine:
                 f"Audio file not found: {audio_path}"
             )
 
-        # Model integration will be added here.
-        # Keep the response format stable.
+        model = self.load_model()
+
+        segments, info = model.transcribe(
+            str(audio_path),
+            beam_size=5,
+            vad_filter=True
+        )
+
+        result_segments = []
+        full_text = []
+
+        for segment in segments:
+
+            text = segment.text.strip()
+
+            if not text:
+                continue
+
+            result_segments.append({
+                "start": float(segment.start),
+                "end": float(segment.end),
+                "text": text
+            })
+
+            full_text.append(text)
 
         return {
             "success": True,
-            "language": "unknown",
-            "text": "",
-            "segments": [],
-            "engine": "whisper-compatible"
+            "language": info.language,
+            "language_probability":
+                float(info.language_probability),
+            "text": " ".join(full_text),
+            "segments": result_segments,
+            "engine": "faster-whisper",
+            "model": self.model_size
         }
 
 
-transcription_engine = TranscriptionEngine()
+transcription_engine = TranscriptionEngine(
+    model_size="tiny"
+)
