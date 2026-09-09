@@ -2,226 +2,215 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0">
+<title>SUN SPY RECAP</title>
 
-    <title>SUN SPY RECAP</title>
-
-    <link
-        rel="stylesheet"
-        href="style.css">
+<link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
 <main class="app">
 
-    <!-- HEADER -->
-    <header class="header">
+<header class="header">
 
-        <div class="brand">
+    <div class="brand">
 
-            <span class="logo">☀️</span>
+        <span class="logo">☀️</span>
 
-            <div>
-                <h1>SUN SPY RECAP</h1>
-                <p>AI Video → Short Recap</p>
-            </div>
-
+        <div>
+            <h1>SUN SPY RECAP</h1>
+            <p>AI Video → Short Recap</p>
         </div>
 
-    </header>
+    </div>
+
+</header>
 
 
-    <!-- HERO -->
-    <section class="hero">
+<section class="hero">
 
-        <div class="badge">
-            AI VIDEO RECAP
+    <div class="badge">
+        AI VIDEO RECAP
+    </div>
+
+    <h2>
+        Turn long videos into
+        <span>short recaps.</span>
+    </h2>
+
+    <p>
+        Upload a video and let SUN SPY find the best scene,
+        create a Burmese recap, generate AI voice,
+        add subtitles and render a 9:16 short.
+    </p>
+
+</section>
+
+
+<section class="upload-card">
+
+    <div
+        id="dropZone"
+        class="drop-zone">
+
+        <div class="upload-icon">
+            🎬
         </div>
 
-        <h2>
-            Turn long videos into
-            <span>short recaps.</span>
-        </h2>
+        <h3>
+            Upload your video
+        </h3>
 
         <p>
-            Upload a video and let SUN SPY find
-            the best scene, create a Burmese recap,
-            generate AI voice, add subtitles and
-            render a 9:16 short.
+            Select a video from your device
         </p>
 
-    </section>
+        <button
+            id="selectButton"
+            type="button">
+            Select Video
+        </button>
+
+        <input
+            id="videoInput"
+            type="file"
+            accept="video/*"
+            hidden>
+
+    </div>
 
 
-    <!-- UPLOAD -->
-    <section class="upload-card">
-
-        <div
-            id="dropZone"
-            class="drop-zone">
-
-            <div class="upload-icon">
-                🎬
-            </div>
-
-            <h3>
-                Upload your video
-            </h3>
-
-            <p>
-                Select a video from your device
-            </p>
+    <div
+        id="fileInfo"
+        class="file-info hidden">
+    </div>
 
 
-            <!-- SELECT VIDEO -->
-            <label
-                for="videoInput"
-                id="selectButton"
-                class="select-video-button">
-
-                Select Video
-
-            </label>
-
-
-            <input
-                id="videoInput"
-                type="file"
-                accept="video/*"
-                hidden>
-
-
-            <!-- SELECTED FILE -->
-            <div
-                id="fileInfo"
-                class="file-info hidden">
-            </div>
-
-
-            <!-- PREVIEW -->
-            <div
-                id="inputPreviewContainer"
-                class="input-preview-container hidden">
-
-                <video
-                    id="inputPreview"
-                    controls
-                    playsinline>
-                </video>
-
-            </div>
-
-
-            <!-- START BUTTON -->
-            <button
-                id="uploadButton"
-                class="start-button"
-                type="button"
-                disabled>
-
-                🚀 Start AI Recap
-
-            </button>
-
-
-            <!-- PROGRESS -->
-            <div
-                id="progressContainer"
-                class="progress-container hidden">
-
-                <div class="progress-header">
-
-                    <span id="progressText">
-                        Preparing...
-                    </span>
-
-                    <span id="progressPercent">
-                        0%
-                    </span>
-
-                </div>
-
-
-                <div class="progress-bar">
-
-                    <div
-                        id="progressBar"
-                        class="progress">
-                    </div>
-
-                </div>
-
-            </div>
-
-
-            <!-- STATUS -->
-            <div
-                id="statusBox"
-                class="status-box hidden">
-            </div>
-
-        </div>
-
-    </section>
-
-
-    <!-- RESULT -->
-    <section
-        id="resultSection"
-        class="result-section hidden">
-
-        <div class="result-header">
-
-            <div>
-
-                <div class="badge">
-                    READY
-                </div>
-
-                <h2>
-                    Your Recap
-                </h2>
-
-            </div>
-
-
-            <a
-                id="downloadButton"
-                class="download"
-                href="#"
-                download>
-
-                Download MP4
-
-            </a>
-
-        </div>
-
+    <div
+        id="inputPreviewContainer"
+        class="input-preview-container hidden">
 
         <video
-            id="resultVideo"
+            id="inputPreview"
             controls
             playsinline>
         </video>
 
+    </div>
 
-        <div
-            id="recapText"
-            class="recap-text">
+
+    <!-- START BUTTON -->
+
+    <button
+        id="uploadButton"
+        class="start-button"
+        type="button"
+        disabled>
+
+        🚀 Start AI Recap
+
+    </button>
+
+
+    <!-- PROGRESS -->
+
+    <div
+        id="progressContainer"
+        class="progress-container hidden">
+
+        <div class="progress-header">
+
+            <span id="progressText">
+                Preparing...
+            </span>
+
+            <span id="progressPercent">
+                0%
+            </span>
+
         </div>
 
-    </section>
+
+        <div class="progress-bar">
+
+            <div
+                id="progressBar"
+                class="progress">
+            </div>
+
+        </div>
+
+    </div>
 
 
-    <!-- FOOTER -->
-    <footer>
-        © 2026 SUN SPY RECAP
-    </footer>
+    <!-- STATUS -->
+
+    <div
+        id="statusBox"
+        class="status-box hidden">
+    </div>
+
+</section>
+
+
+<!-- RESULT -->
+
+<section
+    id="resultSection"
+    class="result-section hidden">
+
+    <div class="result-header">
+
+        <div>
+
+            <div class="badge">
+                READY
+            </div>
+
+            <h2>
+                Your Recap
+            </h2>
+
+        </div>
+
+
+        <a
+            id="downloadButton"
+            class="download"
+            href="#"
+            download>
+
+            Download MP4
+
+        </a>
+
+    </div>
+
+
+    <video
+        id="resultVideo"
+        controls
+        playsinline>
+    </video>
+
+
+    <div
+        id="recapText"
+        class="recap-text">
+    </div>
+
+</section>
+
+
+<footer>
+
+    © 2026 SUN SPY RECAP
+
+</footer>
+
 
 </main>
 
