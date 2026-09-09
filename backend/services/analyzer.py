@@ -1,37 +1,30 @@
+import re
 import subprocess
+
 from pathlib import Path
 
 
-def detect_scenes(video_path: str | Path) -> list[dict]:
-    """
-    Detect scene boundaries using FFmpeg.
-    Returns a list of scene timestamps.
-    """
+def detect_scenes(
+    video_path,
+):
 
-    video_path = Path(video_path)
-
-    if not video_path.exists():
-        raise FileNotFoundError(
-            f"Video not found: {video_path}"
-        )
-
-    command = [
-        "ffmpeg",
-        "-i",
-        str(video_path),
-        "-vf",
-        "select='gt(scene,0.35)',showinfo",
-        "-an",
-        "-f",
-        "null",
-        "-"
-    ]
+    path = Path(video_path)
 
     result = subprocess.run(
-        command,
+        [
+            "ffmpeg",
+            "-i",
+            str(path),
+            "-vf",
+            "select='gt(scene,0.30)',showinfo",
+            "-an",
+            "-f",
+            "null",
+            "-",
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True
+        text=True,
     )
 
     timestamps = []
@@ -42,49 +35,118 @@ def detect_scenes(video_path: str | Path) -> list[dict]:
             continue
 
         try:
-            value = line.split("pts_time:")[1]
-            timestamp = float(value.split()[0])
+
+            value = (
+                line
+                .split("pts_time:")[1]
+                .split()[0]
+            )
 
             timestamps.append({
-                "time": timestamp
+                "time": float(value)
             })
 
-        except (ValueError, IndexError):
+        except (
+            ValueError,
+            IndexError,
+        ):
             continue
 
     return timestamps
 
 
 def choose_highlight(
-    video_path: str | Path,
-    clip_duration: float = 30.0
-) -> dict:
-    """
-    Choose a highlight region from detected scenes.
-    """
+    video_path,
+    clip_duration=30.0,
+    transcript_segments=None,
+):
 
-    scenes = detect_scenes(video_path)
+    path = Path(video_path)
 
-    if not scenes:
-        return {
-            "start": 0.0,
-            "duration": clip_duration,
-            "score": 0.0,
-            "reason": "No scene changes detected"
-        }
+    if not path.exists():
 
-    # Simple first-stage scoring.
-    # Later this will be replaced by AI scoring.
-    best_scene = scenes[0]
+        raise FileNotFoundError(
+            f"Video not found: {path}"
+        )
 
-    start = max(
-        0.0,
-        best_scene["time"] - clip_duration / 2
+    scenes = detect_scenes(
+        path
     )
 
+    if transcript_segments:
+
+        keywords = re.compile(
+            r"("
+            r"important|finally|secret|best|"
+            r"amazing|surprise|"
+            r"အရေးကြီး|နောက်ဆုံး|"
+            r"လျှို့ဝှက်|အံ့သြ|"
+            r"အကောင်းဆုံး"
+            r")",
+            re.I,
+        )
+
+        for segment in transcript_segments:
+
+            if keywords.search(
+                segment.get(
+                    "text",
+                    "",
+                )
+            ):
+
+                start = max(
+                    0.0,
+                    float(
+                        segment["start"]
+                    ) - 5.0,
+                )
+
+                return {
+                    "start": start,
+                    "duration": clip_duration,
+                    "score": 0.9,
+                    "reason": (
+                        "Transcript "
+                        "emphasis match"
+                    ),
+                }
+
+    if scenes:
+
+        middle_index = (
+            len(scenes) // 2
+        )
+
+        candidate = scenes[
+            min(
+                len(scenes) - 1,
+                middle_index,
+            )
+        ]
+
+        start = max(
+            0.0,
+            candidate["time"]
+            - clip_duration / 2,
+        )
+
+        return {
+            "start": start,
+            "duration": clip_duration,
+            "score": 0.6,
+            "reason": (
+                "Scene-change "
+                "highlight"
+            ),
+        }
+
     return {
-        "start": round(start, 2),
+        "start": 0.0,
         "duration": clip_duration,
-        "score": 0.5,
-        "reason": "Scene-change based highlight detection"
+        "score": 0.2,
+        "reason": (
+            "Fallback beginning "
+            "of video"
+        ),
     }
