@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.database import get_job, update_job
+from backend.config import TEMP_DIR
 
 from backend.services.processor import (
     inspect_video,
@@ -29,7 +30,9 @@ from backend.services.subtitles import (
     create_srt,
 )
 
-from backend.config import TEMP_DIR
+from backend.services.renderer import (
+    render_vertical,
+)
 
 
 def now():
@@ -114,14 +117,14 @@ async def process_video(job_id: str):
 
 
         # =================================================
-        # 4. WHISPER TRANSCRIPTION
+        # 4. WHISPER
         # =================================================
 
         update_job(
             job_id,
             status="TRANSCRIBING",
             progress=30,
-            message="Transcribing video speech...",
+            message="Transcribing speech...",
             updated_at=now()
         )
 
@@ -143,9 +146,9 @@ async def process_video(job_id: str):
             or ""
         ).strip()
 
-        segments = (
-            transcription["segments"]
-        )
+        segments = transcription[
+            "segments"
+        ]
 
 
         # =================================================
@@ -155,7 +158,7 @@ async def process_video(job_id: str):
         update_job(
             job_id,
             status="NARRATING",
-            progress=45,
+            progress=40,
             message="Creating Burmese recap...",
             updated_at=now()
         )
@@ -169,7 +172,7 @@ async def process_video(job_id: str):
             raise RuntimeError(
                 recap.get(
                     "error",
-                    "Burmese recap failed"
+                    "Recap creation failed"
                 )
             )
 
@@ -186,7 +189,7 @@ async def process_video(job_id: str):
         update_job(
             job_id,
             status="ANALYZING",
-            progress=55,
+            progress=50,
             message="Finding the most interesting scene...",
             updated_at=now()
         )
@@ -209,8 +212,8 @@ async def process_video(job_id: str):
         update_job(
             job_id,
             status="CLIPPING",
-            progress=65,
-            message="Creating highlight clip...",
+            progress=60,
+            message="Creating highlight...",
             updated_at=now()
         )
 
@@ -227,13 +230,13 @@ async def process_video(job_id: str):
 
 
         # =================================================
-        # 8. CREATE SRT
+        # 8. CREATE SUBTITLES
         # =================================================
 
         update_job(
             job_id,
             status="SUBTITLING",
-            progress=75,
+            progress=70,
             message="Creating subtitles...",
             updated_at=now()
         )
@@ -250,20 +253,26 @@ async def process_video(job_id: str):
 
 
         # =================================================
-        # 9. SAVE RECAP INFORMATION
+        # 9. RENDER 9:16
         # =================================================
 
         update_job(
             job_id,
             status="RENDERING",
             progress=85,
-            message="Preparing final recap...",
+            message="Rendering 9:16 vertical video...",
             updated_at=now()
         )
 
+        final_name = (
+            f"{job_id}_final.mp4"
+        )
 
-        # The final Burmese TTS + subtitle burn-in +
-        # 9:16 rendering will be connected next.
+        final_path = await asyncio.to_thread(
+            render_vertical,
+            clip_path,
+            final_name
+        )
 
 
         # =================================================
@@ -274,9 +283,9 @@ async def process_video(job_id: str):
             job_id,
             status="COMPLETED",
             progress=100,
-            message="Recap created successfully.",
+            message="Final recap created successfully.",
             output_file=str(
-                clip_path
+                final_path
             ),
             updated_at=now()
         )
