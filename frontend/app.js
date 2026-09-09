@@ -1,143 +1,134 @@
 const API_URL = "";
 
-const CHUNK_SIZE = 5 * 1024 * 1024;
+const CHUNK_SIZE =
+    5 * 1024 * 1024;
 
 let currentUploadId = null;
 let currentJobId = null;
-let currentFile = null;
 let statusTimer = null;
 
 
+const $ = id =>
+    document.getElementById(id);
+
+
 const videoInput =
-    document.getElementById("videoInput");
+    $("videoInput");
 
 const selectButton =
-    document.getElementById("selectButton");
+    $("selectButton");
 
 const dropZone =
-    document.getElementById("dropZone");
+    $("dropZone");
 
 const fileInfo =
-    document.getElementById("fileInfo");
+    $("fileInfo");
 
 const progressContainer =
-    document.getElementById("progressContainer");
+    $("progressContainer");
 
 const progressBar =
-    document.getElementById("progressBar");
+    $("progressBar");
 
 const progressPercent =
-    document.getElementById("progressPercent");
+    $("progressPercent");
 
 const progressText =
-    document.getElementById("progressText");
+    $("progressText");
 
 const statusBox =
-    document.getElementById("statusBox");
+    $("statusBox");
 
 const resultSection =
-    document.getElementById("resultSection");
+    $("resultSection");
 
 const resultVideo =
-    document.getElementById("resultVideo");
+    $("resultVideo");
+
+const downloadButton =
+    $("downloadButton");
+
+const recapText =
+    $("recapText");
 
 
-/*
-|--------------------------------------------------------------------------
-| Select Video
-|--------------------------------------------------------------------------
-*/
+selectButton.onclick = () => {
 
-selectButton.addEventListener(
-    "click",
-    () => {
-        videoInput.click();
+    videoInput.click();
+
+};
+
+
+videoInput.onchange = () => {
+
+    const file =
+        videoInput.files[0];
+
+    if (file) {
+
+        uploadVideo(file);
+
     }
-);
+
+};
 
 
-videoInput.addEventListener(
-    "change",
-    () => {
+dropZone.ondragover = event => {
 
-        const file =
-            videoInput.files[0];
+    event.preventDefault();
 
-        if (file) {
-            uploadVideo(file);
-        }
-    }
-);
+    dropZone.classList.add(
+        "dragover"
+    );
+
+};
 
 
-/*
-|--------------------------------------------------------------------------
-| Drag & Drop
-|--------------------------------------------------------------------------
-*/
+dropZone.ondragleave = () => {
 
-dropZone.addEventListener(
-    "dragover",
-    (event) => {
+    dropZone.classList.remove(
+        "dragover"
+    );
 
-        event.preventDefault();
+};
 
-        dropZone.classList.add(
-            "dragover"
+
+dropZone.ondrop = event => {
+
+    event.preventDefault();
+
+    dropZone.classList.remove(
+        "dragover"
+    );
+
+    const file =
+        event.dataTransfer.files[0];
+
+    if (
+        file &&
+        file.type.startsWith(
+            "video/"
+        )
+    ) {
+
+        uploadVideo(file);
+
+    } else {
+
+        showError(
+            "Please select a valid video file."
         );
+
     }
-);
 
+};
 
-dropZone.addEventListener(
-    "dragleave",
-    () => {
-
-        dropZone.classList.remove(
-            "dragover"
-        );
-    }
-);
-
-
-dropZone.addEventListener(
-    "drop",
-    (event) => {
-
-        event.preventDefault();
-
-        dropZone.classList.remove(
-            "dragover"
-        );
-
-        const file =
-            event.dataTransfer.files[0];
-
-        if (
-            file &&
-            file.type.startsWith("video/")
-        ) {
-            uploadVideo(file);
-        } else {
-            showError(
-                "Please select a valid video file."
-            );
-        }
-    }
-);
-
-
-/*
-|--------------------------------------------------------------------------
-| Upload Video
-|--------------------------------------------------------------------------
-*/
 
 async function uploadVideo(file) {
 
     try {
 
-        currentFile = file;
+        stopPolling();
 
         resultSection.classList.add(
             "hidden"
@@ -146,6 +137,8 @@ async function uploadVideo(file) {
         resultVideo.removeAttribute(
             "src"
         );
+
+        recapText.textContent = "";
 
         fileInfo.classList.remove(
             "hidden"
@@ -168,12 +161,6 @@ async function uploadVideo(file) {
         );
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | 1. Initialize Upload
-        |--------------------------------------------------------------------------
-        */
-
         const initForm =
             new FormData();
 
@@ -188,7 +175,7 @@ async function uploadVideo(file) {
         );
 
 
-        const initResponse =
+        const init =
             await fetch(
                 `${API_URL}/api/upload/init`,
                 {
@@ -198,34 +185,27 @@ async function uploadVideo(file) {
             );
 
 
-        if (!initResponse.ok) {
-
-            const errorText =
-                await initResponse.text();
+        if (!init.ok) {
 
             throw new Error(
-                `Upload initialization failed: ${errorText}`
+                await init.text()
             );
+
         }
 
 
         const initData =
-            await initResponse.json();
+            await init.json();
 
 
         currentUploadId =
             initData.upload_id;
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | 2. Upload Chunks
-        |--------------------------------------------------------------------------
-        */
-
         const totalChunks =
             Math.ceil(
-                file.size / CHUNK_SIZE
+                file.size /
+                CHUNK_SIZE
             );
 
 
@@ -244,6 +224,7 @@ async function uploadVideo(file) {
                     file.size
                 );
 
+
             const chunk =
                 file.slice(
                     start,
@@ -251,67 +232,57 @@ async function uploadVideo(file) {
                 );
 
 
-            const chunkForm =
+            const form =
                 new FormData();
 
-            chunkForm.append(
+
+            form.append(
                 "upload_id",
                 currentUploadId
             );
 
-            chunkForm.append(
+            form.append(
                 "chunk_index",
                 index
             );
 
-            chunkForm.append(
+            form.append(
                 "chunk",
                 chunk,
                 file.name
             );
 
 
-            const chunkResponse =
+            const response =
                 await fetch(
                     `${API_URL}/api/upload/chunk`,
                     {
                         method: "POST",
-                        body: chunkForm
+                        body: form
                     }
                 );
 
 
-            if (!chunkResponse.ok) {
-
-                const errorText =
-                    await chunkResponse.text();
+            if (!response.ok) {
 
                 throw new Error(
-                    `Chunk ${index + 1} failed: ${errorText}`
+                    `Chunk ${index + 1} failed: ${await response.text()}`
                 );
+
             }
 
 
-            const percent =
+            setProgress(
                 Math.round(
                     ((index + 1) /
                         totalChunks) *
                     100
-                );
-
-
-            setProgress(
-                percent,
+                ),
                 `Uploading ${index + 1} / ${totalChunks}`
             );
+
         }
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | 3. Complete Upload
-        |--------------------------------------------------------------------------
-        */
 
         setProgress(
             100,
@@ -321,6 +292,7 @@ async function uploadVideo(file) {
 
         const completeForm =
             new FormData();
+
 
         completeForm.append(
             "upload_id",
@@ -338,7 +310,7 @@ async function uploadVideo(file) {
         );
 
 
-        const completeResponse =
+        const complete =
             await fetch(
                 `${API_URL}/api/upload/complete`,
                 {
@@ -348,32 +320,24 @@ async function uploadVideo(file) {
             );
 
 
-        if (!completeResponse.ok) {
-
-            const errorText =
-                await completeResponse.text();
+        if (!complete.ok) {
 
             throw new Error(
-                `Upload completion failed: ${errorText}`
+                await complete.text()
             );
+
         }
 
 
         const completeData =
-            await completeResponse.json();
+            await complete.json();
 
 
         statusBox.textContent =
-            "✅ Upload completed. Starting recap...";
+            "🎬 Starting AI recap...";
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | 4. Create Recap Job
-        |--------------------------------------------------------------------------
-        */
-
-        const recapResponse =
+        const recap =
             await fetch(
                 `${API_URL}/api/recap`,
                 {
@@ -391,39 +355,28 @@ async function uploadVideo(file) {
 
                         filename:
                             completeData.filename
+
                     })
                 }
             );
 
 
-        if (!recapResponse.ok) {
-
-            const errorText =
-                await recapResponse.text();
+        if (!recap.ok) {
 
             throw new Error(
-                `Recap creation failed: ${errorText}`
+                await recap.text()
             );
+
         }
 
 
         const recapData =
-            await recapResponse.json();
+            await recap.json();
 
 
         currentJobId =
             recapData.job_id;
 
-
-        statusBox.textContent =
-            "🎬 AI recap processing started...";
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | 5. Monitor Job
-        |--------------------------------------------------------------------------
-        */
 
         monitorJob(
             currentJobId
@@ -433,44 +386,44 @@ async function uploadVideo(file) {
     } catch (error) {
 
         console.error(
-            "SUN SPY RECAP ERROR:",
+            "SUN SPY RECAP:",
             error
         );
 
         showError(
-            error.message
+            error.message ||
+            "Something went wrong."
         );
+
     }
+
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Monitor Processing Job
-|--------------------------------------------------------------------------
-*/
-
 function monitorJob(jobId) {
 
-    if (statusTimer) {
-        clearInterval(statusTimer);
-    }
+    stopPolling();
 
-
-    checkJobStatus(jobId);
-
+    checkJobStatus(
+        jobId
+    );
 
     statusTimer =
         setInterval(
             () => {
-                checkJobStatus(jobId);
+                checkJobStatus(
+                    jobId
+                );
             },
             2000
         );
+
 }
 
 
-async function checkJobStatus(jobId) {
+async function checkJobStatus(
+    jobId
+) {
 
     try {
 
@@ -485,11 +438,13 @@ async function checkJobStatus(jobId) {
             throw new Error(
                 "Unable to get processing status."
             );
+
         }
 
 
         const data =
             await response.json();
+
 
         const job =
             data.job;
@@ -497,102 +452,68 @@ async function checkJobStatus(jobId) {
 
         setProgress(
             job.progress || 0,
-            job.message || "Processing..."
+            job.message ||
+            "Processing..."
         );
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | Completed
-        |--------------------------------------------------------------------------
-        */
 
         if (
             job.status ===
             "COMPLETED"
         ) {
 
-            clearInterval(
-                statusTimer
-            );
-
-            statusTimer = null;
-
+            stopPolling();
 
             statusBox.textContent =
                 "🎉 Recap completed successfully!";
 
 
-            if (job.output_file) {
+            if (
+                job.output_file
+            ) {
 
                 showResult(
-                    job.output_file
+                    job.output_file,
+                    job.recap_text
                 );
+
             }
 
-            return;
         }
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | Failed
-        |--------------------------------------------------------------------------
-        */
 
         if (
             job.status ===
             "FAILED"
         ) {
 
-            clearInterval(
-                statusTimer
-            );
-
-            statusTimer = null;
-
+            stopPolling();
 
             showError(
                 job.error ||
                 "Video processing failed."
             );
 
-            return;
         }
 
 
     } catch (error) {
 
-        console.error(
-            "Status error:",
-            error
-        );
-
-        clearInterval(
-            statusTimer
-        );
-
-        statusTimer = null;
+        stopPolling();
 
         showError(
             error.message
         );
+
     }
+
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Show Result Video
-|--------------------------------------------------------------------------
-*/
-
-function showResult(path) {
-
-    resultSection.classList.remove(
-        "hidden"
-    );
-
+function showResult(
+    path,
+    text
+) {
 
     const filename =
         path
@@ -602,36 +523,59 @@ function showResult(path) {
             .pop();
 
 
-    const videoURL =
+    const url =
         `${API_URL}/api/files/${encodeURIComponent(filename)}`;
 
 
+    resultSection.classList.remove(
+        "hidden"
+    );
+
+
     resultVideo.src =
-        videoURL;
+        url;
+
+
+    downloadButton.href =
+        url;
+
+
+    recapText.textContent =
+        text || "";
 
 
     resultVideo.load();
 
 
-    resultVideo.scrollIntoView({
+    resultSection.scrollIntoView({
         behavior: "smooth",
         block: "start"
     });
+
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Progress
-|--------------------------------------------------------------------------
-*/
+function stopPolling() {
+
+    if (statusTimer) {
+
+        clearInterval(
+            statusTimer
+        );
+
+    }
+
+    statusTimer = null;
+
+}
+
 
 function setProgress(
     percent,
     message
 ) {
 
-    const safePercent =
+    const value =
         Math.max(
             0,
             Math.min(
@@ -642,25 +586,23 @@ function setProgress(
 
 
     progressBar.style.width =
-        `${safePercent}%`;
+        `${value}%`;
 
 
     progressPercent.textContent =
-        `${safePercent}%`;
+        `${value}%`;
 
 
     progressText.textContent =
-        message || "Processing...";
+        message ||
+        "Processing...";
+
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Error
-|--------------------------------------------------------------------------
-*/
-
-function showError(message) {
+function showError(
+    message
+) {
 
     statusBox.classList.remove(
         "hidden"
@@ -671,57 +613,57 @@ function showError(message) {
         `❌ ${message}`;
 
 
-    progressText.textContent =
-        "Processing stopped.";
-
-
     progressBar.style.width =
         "0%";
 
 
     progressPercent.textContent =
         "0%";
+
+
+    progressText.textContent =
+        "Processing stopped.";
+
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| File Size
-|--------------------------------------------------------------------------
-*/
-
-function formatSize(bytes) {
+function formatSize(
+    bytes
+) {
 
     if (bytes < 1024) {
+
         return `${bytes} B`;
-    }
 
-
-    if (bytes < 1024 * 1024) {
-
-        return `${(
-            bytes / 1024
-        ).toFixed(2)} KB`;
     }
 
 
     if (
         bytes <
-        1024 * 1024 * 1024
+        1024 ** 2
     ) {
 
         return `${(
-            bytes /
-            1024 /
-            1024
+            bytes / 1024
+        ).toFixed(2)} KB`;
+
+    }
+
+
+    if (
+        bytes <
+        1024 ** 3
+    ) {
+
+        return `${(
+            bytes / 1024 ** 2
         ).toFixed(2)} MB`;
+
     }
 
 
     return `${(
-        bytes /
-        1024 /
-        1024 /
-        1024
+        bytes / 1024 ** 3
     ).toFixed(2)} GB`;
+
 }
