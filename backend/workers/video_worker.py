@@ -21,6 +21,16 @@ from backend.services.transcription import (
     transcription_engine,
 )
 
+from backend.services.narrator import (
+    narrator,
+)
+
+from backend.services.subtitles import (
+    create_srt,
+)
+
+from backend.config import TEMP_DIR
+
 
 def now():
     return datetime.now(
@@ -41,9 +51,9 @@ async def process_video(job_id: str):
 
     try:
 
-        # -------------------------------------------------
-        # STEP 1 — Preparing
-        # -------------------------------------------------
+        # =================================================
+        # 1. PREPARE
+        # =================================================
 
         update_job(
             job_id,
@@ -56,9 +66,9 @@ async def process_video(job_id: str):
         await asyncio.sleep(0.2)
 
 
-        # -------------------------------------------------
-        # STEP 2 — Inspect Video
-        # -------------------------------------------------
+        # =================================================
+        # 2. INSPECT VIDEO
+        # =================================================
 
         update_job(
             job_id,
@@ -82,9 +92,9 @@ async def process_video(job_id: str):
         ]
 
 
-        # -------------------------------------------------
-        # STEP 3 — Extract Audio
-        # -------------------------------------------------
+        # =================================================
+        # 3. EXTRACT AUDIO
+        # =================================================
 
         update_job(
             job_id,
@@ -103,26 +113,22 @@ async def process_video(job_id: str):
         )
 
 
-        # -------------------------------------------------
-        # STEP 4 — Whisper STT
-        # -------------------------------------------------
+        # =================================================
+        # 4. WHISPER TRANSCRIPTION
+        # =================================================
 
         update_job(
             job_id,
             status="TRANSCRIBING",
             progress=30,
-            message="Transcribing speech with Whisper...",
+            message="Transcribing video speech...",
             updated_at=now()
         )
 
-
-        transcription = (
-            await asyncio.to_thread(
-                transcription_engine.transcribe,
-                audio_file
-            )
+        transcription = await asyncio.to_thread(
+            transcription_engine.transcribe,
+            audio_file
         )
-
 
         if not transcription["success"]:
             raise RuntimeError(
@@ -132,34 +138,63 @@ async def process_video(job_id: str):
                 )
             )
 
+        transcript = (
+            transcription["text"]
+            or ""
+        ).strip()
 
-        transcript = transcription[
-            "text"
-        ]
-
-        segments = transcription[
-            "segments"
-        ]
+        segments = (
+            transcription["segments"]
+        )
 
 
-        # -------------------------------------------------
-        # STEP 5 — Analyze Highlight
-        # -------------------------------------------------
+        # =================================================
+        # 5. BURMESE RECAP
+        # =================================================
+
+        update_job(
+            job_id,
+            status="NARRATING",
+            progress=45,
+            message="Creating Burmese recap...",
+            updated_at=now()
+        )
+
+        recap = await asyncio.to_thread(
+            narrator.create_recap,
+            transcript
+        )
+
+        if not recap["success"]:
+            raise RuntimeError(
+                recap.get(
+                    "error",
+                    "Burmese recap failed"
+                )
+            )
+
+        recap_text = (
+            recap["text"]
+            or ""
+        ).strip()
+
+
+        # =================================================
+        # 6. FIND HIGHLIGHT
+        # =================================================
 
         update_job(
             job_id,
             status="ANALYZING",
-            progress=50,
+            progress=55,
             message="Finding the most interesting scene...",
             updated_at=now()
         )
-
 
         clip_duration = min(
             30.0,
             max(5.0, duration)
         )
-
 
         highlight = choose_highlight(
             input_file,
@@ -167,97 +202,79 @@ async def process_video(job_id: str):
         )
 
 
-        # -------------------------------------------------
-        # STEP 6 — Create Highlight
-        # -------------------------------------------------
+        # =================================================
+        # 7. CREATE HIGHLIGHT
+        # =================================================
 
         update_job(
             job_id,
             status="CLIPPING",
-            progress=60,
+            progress=65,
             message="Creating highlight clip...",
             updated_at=now()
         )
-
 
         clip_name = (
             f"{job_id}_highlight.mp4"
         )
 
-
-        clip_path = (
-            create_highlight_clip(
-                video_path=input_file,
-                start=highlight["start"],
-                duration=highlight["duration"],
-                output_name=clip_name
-            )
+        clip_path = create_highlight_clip(
+            video_path=input_file,
+            start=highlight["start"],
+            duration=highlight["duration"],
+            output_name=clip_name
         )
 
 
-        # -------------------------------------------------
-        # STEP 7 — Recap Preparation
-        # -------------------------------------------------
-
-        update_job(
-            job_id,
-            status="NARRATING",
-            progress=70,
-            message="Preparing Burmese recap...",
-            updated_at=now()
-        )
-
-
-        # Temporary result.
-        # Burmese AI summarization will be
-        # connected in the next phase.
-
-        recap_text = transcript[:500]
-
-
-        # -------------------------------------------------
-        # STEP 8 — Subtitles
-        # -------------------------------------------------
+        # =================================================
+        # 8. CREATE SRT
+        # =================================================
 
         update_job(
             job_id,
             status="SUBTITLING",
-            progress=80,
-            message="Preparing subtitles...",
+            progress=75,
+            message="Creating subtitles...",
             updated_at=now()
         )
 
+        subtitle_path = (
+            TEMP_DIR /
+            f"{job_id}.srt"
+        )
 
-        # Subtitle generation will be connected
-        # to the final rendered video later.
+        create_srt(
+            segments,
+            subtitle_path
+        )
 
 
-        # -------------------------------------------------
-        # STEP 9 — Rendering
-        # -------------------------------------------------
+        # =================================================
+        # 9. SAVE RECAP INFORMATION
+        # =================================================
 
         update_job(
             job_id,
             status="RENDERING",
-            progress=90,
-            message="Preparing final video...",
+            progress=85,
+            message="Preparing final recap...",
             updated_at=now()
         )
 
 
-        # Final rendering will be connected
-        # in the next rendering phase.
+        # The final Burmese TTS + subtitle burn-in +
+        # 9:16 rendering will be connected next.
 
 
-        # -------------------------------------------------
-        # STEP 10 — Completed
-        # -------------------------------------------------
+        # =================================================
+        # 10. COMPLETE
+        # =================================================
 
         update_job(
             job_id,
             status="COMPLETED",
             progress=100,
-            message="Recap processing completed.",
+            message="Recap created successfully.",
             output_file=str(
                 clip_path
             ),
