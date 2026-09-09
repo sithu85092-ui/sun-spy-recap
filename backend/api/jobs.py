@@ -1,9 +1,11 @@
-from fastapi import (
-    APIRouter,
-    HTTPException,
-)
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
-from backend.database import get_job
+from ..database import get_db
+from ..services.job_service import (
+    get_job,
+    job_to_dict,
+)
 
 
 router = APIRouter(
@@ -13,32 +15,19 @@ router = APIRouter(
 
 
 @router.get("/status/{job_id}")
-async def get_job_status(
+def status(
     job_id: str,
+    db: Session = Depends(get_db),
 ):
+    job = get_job(db, job_id)
 
-    job = get_job(job_id)
-
-    if job is None:
+    if not job:
         raise HTTPException(
-            404,
-            "Job not found",
+            status_code=404,
+            detail="Job not found",
         )
 
     return {
         "success": True,
-        "job": {
-            "id": job["id"],
-            "upload_id": job["upload_id"],
-            "status": job["status"],
-            "progress": job["progress"],
-            "message": job["message"],
-            "input_file": job["input_file"],
-            "output_file": job["output_file"],
-            "error": job["error"],
-            "recap_text": job["recap_text"],
-            "language": job["language"],
-            "created_at": job["created_at"],
-            "updated_at": job["updated_at"],
-        },
+        "job": job_to_dict(job),
     }
