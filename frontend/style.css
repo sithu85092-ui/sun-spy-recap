@@ -1,0 +1,186 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background: #0b0b0f;
+    color: #ffffff;
+    min-height: 100vh;
+}
+
+.app {
+    width: min(900px, 92%);
+    margin: auto;
+}
+
+.header {
+    padding: 28px 0;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo {
+    font-size: 38px;
+}
+
+.brand h1 {
+    font-size: 22px;
+}
+
+.brand p {
+    color: #999;
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.hero {
+    text-align: center;
+    padding: 60px 0 35px;
+}
+
+.hero h2 {
+    font-size: clamp(32px, 6vw, 58px);
+    line-height: 1.1;
+}
+
+.hero h2 span {
+    display: block;
+}
+
+.hero p {
+    color: #aaa;
+    max-width: 600px;
+    margin: 20px auto;
+    line-height: 1.6;
+}
+
+.upload-card {
+    background: #15151c;
+    border: 1px solid #292934;
+    border-radius: 22px;
+    padding: 20px;
+}
+
+.drop-zone {
+    border: 2px dashed #3b3b48;
+    border-radius: 18px;
+    text-align: center;
+    padding: 55px 20px;
+    transition: 0.2s;
+}
+
+.drop-zone.dragover {
+    border-color: #ffffff;
+    transform: scale(1.01);
+}
+
+.upload-icon {
+    font-size: 50px;
+    margin-bottom: 15px;
+}
+
+.drop-zone h3 {
+    font-size: 22px;
+    margin-bottom: 8px;
+}
+
+.drop-zone p {
+    color: #999;
+    margin-bottom: 22px;
+}
+
+button {
+    border: none;
+    border-radius: 12px;
+    padding: 13px 22px;
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.file-info {
+    margin-top: 18px;
+    padding: 15px;
+    background: #1e1e27;
+    border-radius: 12px;
+}
+
+.progress-container {
+    margin-top: 18px;
+}
+
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 9px;
+    font-size: 14px;
+}
+
+.progress-bar {
+    height: 10px;
+    background: #292934;
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+.progress {
+    width: 0%;
+    height: 100%;
+    transition: width 0.2s;
+}
+
+.status-box {
+    margin-top: 18px;
+    padding: 15px;
+    background: #1e1e27;
+    border-radius: 12px;
+    line-height: 1.5;
+}
+
+.result-section {
+    margin: 35px 0;
+}
+
+.result-section h2 {
+    margin-bottom: 15px;
+}
+
+.result-section video {
+    width: 100%;
+    max-height: 700px;
+    background: #000;
+    border-radius: 18px;
+}
+
+.hidden {
+    display: none;
+}
+
+footer {
+    text-align: center;
+    color: #666;
+    padding: 45px 0;
+    font-size: 13px;
+}
+
+@media (max-width: 600px) {
+
+    .hero {
+        padding-top: 35px;
+    }
+
+    .drop-zone {
+        padding: 40px 15px;
+    }
+
+    .brand h1 {
+        font-size: 19px;
+    }
+}
