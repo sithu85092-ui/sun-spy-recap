@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api.upload import router as upload_router
+
 app = FastAPI(
     title="SUN SPY RECAP API",
     version="1.0.0",
-    description="AI Video Recap API"
+    description="Professional AI Video Recap API"
 )
 
 app.add_middleware(
@@ -15,6 +17,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(upload_router)
+
+
+@app.get("/")
+async def root():
+    return {
+        "name": "SUN SPY RECAP",
+        "version": "1.0.0",
+        "message": "Upload • Discover • Recap"
+    }
+
 
 @app.get("/api/health")
 async def health():
@@ -22,12 +35,4 @@ async def health():
         "status": "ok",
         "service": "SUN SPY RECAP API",
         "version": "1.0.0"
-    }
-
-
-@app.get("/")
-async def root():
-    return {
-        "name": "SUN SPY RECAP",
-        "message": "Upload • Discover • Recap"
     }
