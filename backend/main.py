@@ -1,67 +1,61 @@
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.database import init_database
-
-from backend.api.upload import router as upload_router
-from backend.api.jobs import router as jobs_router
-from backend.api.recap import router as recap_router
-from backend.api.files import router as files_router
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-
-    init_database()
-
-    yield
+from .database import init_db
+from .api import jobs
+from .api import recap
+from .api import upload
 
 
 app = FastAPI(
     title="SUN SPY RECAP API",
-    version="2.0.0",
-    description="AI Video Recap Pipeline",
-    lifespan=lifespan,
+    version="3.0.0",
 )
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-app.include_router(upload_router)
-app.include_router(jobs_router)
-app.include_router(recap_router)
-app.include_router(files_router)
+@app.on_event("startup")
+def startup():
+    init_db()
 
 
 @app.get("/")
-async def root():
-
+def root():
     return {
-        "name": "SUN SPY RECAP",
-        "version": "2.0.0",
-        "status": "online",
-        "pipeline": (
-            "upload -> whisper -> "
-            "highlight -> recap -> "
-            "tts -> subtitles -> 9:16"
-        ),
+        "ok": True,
+        "service": "SUN SPY RECAP API",
+        "version": "3.0.0",
+        "database": "PostgreSQL",
+        "pipeline": [
+            "upload",
+            "whisper",
+            "highlight",
+            "recap",
+            "tts",
+            "subtitles",
+            "9:16 render",
+        ],
     }
 
 
 @app.get("/api/health")
-async def health():
-
+def health():
     return {
         "status": "ok",
         "service": "SUN SPY RECAP API",
-        "version": "2.0.0",
+        "version": "3.0.0",
+        "database": "postgresql",
     }
+
+
+app.include_router(upload.router)
+app.include_router(recap.router)
+app.include_router(jobs.router)
