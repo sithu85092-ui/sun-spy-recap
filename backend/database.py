@@ -1,5 +1,4 @@
 import sqlite3
-from pathlib import Path
 
 from backend.config import BASE_DIR
 
@@ -10,7 +9,7 @@ DATABASE_PATH = BASE_DIR / "sun_spy_recap.db"
 def get_connection():
     connection = sqlite3.connect(
         DATABASE_PATH,
-        check_same_thread=False
+        check_same_thread=False,
     )
 
     connection.row_factory = sqlite3.Row
@@ -21,20 +20,24 @@ def get_connection():
 def init_database():
     connection = get_connection()
 
-    connection.execute("""
+    connection.execute(
+        """
         CREATE TABLE IF NOT EXISTS jobs (
             id TEXT PRIMARY KEY,
-            upload_id TEXT,
-            input_file TEXT,
+            upload_id TEXT NOT NULL,
+            input_file TEXT NOT NULL,
             output_file TEXT,
             status TEXT NOT NULL,
             progress INTEGER DEFAULT 0,
             message TEXT,
             error TEXT,
+            recap_text TEXT,
+            language TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
-    """)
+        """
+    )
 
     connection.commit()
     connection.close()
@@ -44,7 +47,7 @@ def create_job(
     job_id,
     upload_id,
     input_file,
-    created_at
+    created_at,
 ):
     connection = get_connection()
 
@@ -60,18 +63,24 @@ def create_job(
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (
+            ?,
+            ?,
+            ?,
+            'QUEUED',
+            0,
+            'Job queued',
+            ?,
+            ?
+        )
         """,
         (
             job_id,
             upload_id,
             input_file,
-            "QUEUED",
-            0,
-            "Job queued",
             created_at,
-            created_at
-        )
+            created_at,
+        ),
     )
 
     connection.commit()
@@ -82,8 +91,12 @@ def get_job(job_id):
     connection = get_connection()
 
     job = connection.execute(
-        "SELECT * FROM jobs WHERE id = ?",
-        (job_id,)
+        """
+        SELECT *
+        FROM jobs
+        WHERE id = ?
+        """,
+        (job_id,),
     ).fetchone()
 
     connection.close()
@@ -98,42 +111,39 @@ def update_job(
     message=None,
     output_file=None,
     error=None,
-    updated_at=None
+    recap_text=None,
+    language=None,
+    updated_at=None,
 ):
-    connection = get_connection()
-
     fields = []
     values = []
 
-    if status is not None:
-        fields.append("status = ?")
-        values.append(status)
+    updates = {
+        "status": status,
+        "progress": progress,
+        "message": message,
+        "output_file": output_file,
+        "error": error,
+        "recap_text": recap_text,
+        "language": language,
+        "updated_at": updated_at,
+    }
 
-    if progress is not None:
-        fields.append("progress = ?")
-        values.append(progress)
+    for field, value in updates.items():
 
-    if message is not None:
-        fields.append("message = ?")
-        values.append(message)
+        if value is not None:
+            fields.append(
+                f"{field} = ?"
+            )
 
-    if output_file is not None:
-        fields.append("output_file = ?")
-        values.append(output_file)
-
-    if error is not None:
-        fields.append("error = ?")
-        values.append(error)
-
-    if updated_at is not None:
-        fields.append("updated_at = ?")
-        values.append(updated_at)
+            values.append(value)
 
     if not fields:
-        connection.close()
         return
 
     values.append(job_id)
+
+    connection = get_connection()
 
     connection.execute(
         f"""
@@ -141,7 +151,7 @@ def update_job(
         SET {", ".join(fields)}
         WHERE id = ?
         """,
-        values
+        values,
     )
 
     connection.commit()
