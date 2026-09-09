@@ -1,7 +1,11 @@
 fastapi
 uvicorn[standard]
 python-multipart
-faster-whisper
-edge-tts
-ffmpeg-python
+psycopg2-binary
+SQLAlchemy
 pydantic
+pydantic-settings
+ffmpeg-python
+edge-tts
+openai-whisper
+torch
