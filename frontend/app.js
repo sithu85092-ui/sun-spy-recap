@@ -1,4 +1,4 @@
-const API_URL = "";
+const API_URL = "https://sun-spy-recap.onrender.com";
 
 const CHUNK_SIZE =
     5 * 1024 * 1024;
