@@ -1,158 +1,48 @@
-import sqlite3
+import os
 
-from backend.config import BASE_DIR
-
-
-DATABASE_PATH = BASE_DIR / "sun_spy_recap.db"
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 
-def get_connection():
-    connection = sqlite3.connect(
-        DATABASE_PATH,
-        check_same_thread=False,
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is not configured."
     )
 
-    connection.row_factory = sqlite3.Row
-
-    return connection
-
-
-def init_database():
-    connection = get_connection()
-
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS jobs (
-            id TEXT PRIMARY KEY,
-            upload_id TEXT NOT NULL,
-            input_file TEXT NOT NULL,
-            output_file TEXT,
-            status TEXT NOT NULL,
-            progress INTEGER DEFAULT 0,
-            message TEXT,
-            error TEXT,
-            recap_text TEXT,
-            language TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """
+# Render may provide postgres://
+# SQLAlchemy expects postgresql://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgres://",
+        "postgresql://",
+        1
     )
 
-    connection.commit()
-    connection.close()
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=300,
+)
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+)
+
+Base = declarative_base()
 
 
-def create_job(
-    job_id,
-    upload_id,
-    input_file,
-    created_at,
-):
-    connection = get_connection()
+def get_db():
+    db = SessionLocal()
 
-    connection.execute(
-        """
-        INSERT INTO jobs (
-            id,
-            upload_id,
-            input_file,
-            status,
-            progress,
-            message,
-            created_at,
-            updated_at
-        )
-        VALUES (
-            ?,
-            ?,
-            ?,
-            'QUEUED',
-            0,
-            'Job queued',
-            ?,
-            ?
-        )
-        """,
-        (
-            job_id,
-            upload_id,
-            input_file,
-            created_at,
-            created_at,
-        ),
-    )
-
-    connection.commit()
-    connection.close()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-def get_job(job_id):
-    connection = get_connection()
-
-    job = connection.execute(
-        """
-        SELECT *
-        FROM jobs
-        WHERE id = ?
-        """,
-        (job_id,),
-    ).fetchone()
-
-    connection.close()
-
-    return job
-
-
-def update_job(
-    job_id,
-    status=None,
-    progress=None,
-    message=None,
-    output_file=None,
-    error=None,
-    recap_text=None,
-    language=None,
-    updated_at=None,
-):
-    fields = []
-    values = []
-
-    updates = {
-        "status": status,
-        "progress": progress,
-        "message": message,
-        "output_file": output_file,
-        "error": error,
-        "recap_text": recap_text,
-        "language": language,
-        "updated_at": updated_at,
-    }
-
-    for field, value in updates.items():
-
-        if value is not None:
-            fields.append(
-                f"{field} = ?"
-            )
-
-            values.append(value)
-
-    if not fields:
-        return
-
-    values.append(job_id)
-
-    connection = get_connection()
-
-    connection.execute(
-        f"""
-        UPDATE jobs
-        SET {", ".join(fields)}
-        WHERE id = ?
-        """,
-        values,
-    )
-
-    connection.commit()
-    connection.close()
+def init_db():
+    Base.metadata.create_all(bind=engine)
