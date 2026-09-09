@@ -1,13 +1,28 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.database import init_database
 from backend.api.upload import router as upload_router
+from backend.api.jobs import router as jobs_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    init_database()
+
+    yield
+
 
 app = FastAPI(
     title="SUN SPY RECAP API",
     version="1.0.0",
-    description="Professional AI Video Recap API"
+    description="Professional AI Video Recap API",
+    lifespan=lifespan
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,11 +32,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 app.include_router(upload_router)
+app.include_router(jobs_router)
 
 
 @app.get("/")
 async def root():
+
     return {
         "name": "SUN SPY RECAP",
         "version": "1.0.0",
@@ -31,6 +49,7 @@ async def root():
 
 @app.get("/api/health")
 async def health():
+
     return {
         "status": "ok",
         "service": "SUN SPY RECAP API",
