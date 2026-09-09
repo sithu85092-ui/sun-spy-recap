@@ -4,6 +4,7 @@
     padding: 0;
 }
 
+
 body {
     font-family: Arial, sans-serif;
     background: #08090c;
@@ -11,14 +12,17 @@ body {
     min-height: 100vh;
 }
 
+
 .app {
     width: min(920px, 92%);
     margin: auto;
 }
 
+
 .header {
     padding: 28px 0;
 }
+
 
 .brand {
     display: flex;
@@ -26,13 +30,16 @@ body {
     gap: 12px;
 }
 
+
 .logo {
     font-size: 38px;
 }
 
+
 .brand h1 {
     font-size: 21px;
 }
+
 
 .brand p {
     color: #777;
@@ -40,10 +47,12 @@ body {
     margin-top: 4px;
 }
 
+
 .hero {
     text-align: center;
     padding: 55px 0 35px;
 }
+
 
 .badge {
     display: inline-block;
@@ -56,14 +65,17 @@ body {
     margin-bottom: 16px;
 }
 
+
 .hero h2 {
     font-size: clamp(34px, 7vw, 64px);
     line-height: 1.04;
 }
 
+
 .hero h2 span {
     display: block;
 }
+
 
 .hero p {
     color: #999;
@@ -72,12 +84,14 @@ body {
     line-height: 1.65;
 }
 
+
 .upload-card {
     background: #12141a;
     border: 1px solid #252832;
     border-radius: 24px;
     padding: 20px;
 }
+
 
 .drop-zone {
     border: 2px dashed #383c47;
@@ -87,119 +101,209 @@ body {
     transition: 0.2s;
 }
 
+
 .drop-zone.dragover {
     border-color: #ffffff;
     background: #181b22;
 }
+
 
 .upload-icon {
     font-size: 48px;
     margin-bottom: 15px;
 }
 
+
 .drop-zone h3 {
     font-size: 21px;
     margin-bottom: 8px;
 }
+
 
 .drop-zone p {
     color: #888;
     margin-bottom: 22px;
 }
 
+
+/* SELECT VIDEO BUTTON */
+
+.select-video-button {
+    display: inline-block;
+
+    background: #ffffff;
+    color: #08090c;
+
+    border: 0;
+    border-radius: 12px;
+
+    padding: 13px 22px;
+
+    font-size: 15px;
+    font-weight: 800;
+
+    cursor: pointer;
+
+    text-decoration: none;
+
+    user-select: none;
+
+    -webkit-user-select: none;
+
+    -webkit-tap-highlight-color: transparent;
+
+    touch-action: manipulation;
+}
+
+
+.select-video-button:active {
+    transform: scale(0.97);
+}
+
+
 button,
 .download {
     display: inline-block;
+
     background: #ffffff;
     color: #08090c;
+
     border: 0;
     border-radius: 12px;
+
     padding: 13px 22px;
+
     font-size: 15px;
     font-weight: 800;
+
     cursor: pointer;
+
     text-decoration: none;
 }
+
 
 .file-info,
 .status-box {
     margin-top: 18px;
+
     padding: 15px;
+
     background: #191c24;
+
     border-radius: 13px;
+
     color: #ddd;
+
     line-height: 1.5;
 }
+
 
 .progress-container {
     margin-top: 18px;
 }
 
+
 .progress-header {
     display: flex;
+
     justify-content: space-between;
+
     margin-bottom: 9px;
+
     font-size: 13px;
+
     color: #aaa;
 }
 
+
 .progress-bar {
     height: 10px;
+
     background: #292d36;
+
     border-radius: 20px;
+
     overflow: hidden;
 }
 
+
 .progress {
     width: 0;
+
     height: 100%;
+
     background: #ffffff;
+
     transition: width 0.2s;
 }
+
 
 .result-section {
     margin: 38px 0;
 }
 
+
 .result-header {
     display: flex;
+
     justify-content: space-between;
+
     align-items: end;
+
     gap: 20px;
+
     margin-bottom: 15px;
 }
+
 
 .result-header h2 {
     font-size: 28px;
 }
 
+
 .result-section video {
     width: 100%;
+
     max-height: 720px;
+
     background: #000000;
+
     border-radius: 19px;
 }
 
+
 .recap-text {
     margin-top: 15px;
+
     padding: 18px;
+
     background: #12141a;
+
     border: 1px solid #252832;
+
     border-radius: 15px;
+
     color: #ddd;
+
     line-height: 1.7;
 }
+
 
 .hidden {
     display: none;
 }
 
+
 footer {
     text-align: center;
+
     color: #555;
+
     padding: 45px 0;
+
     font-size: 13px;
 }
+
 
 @media (max-width: 600px) {
 
@@ -207,16 +311,32 @@ footer {
         padding-top: 35px;
     }
 
+
     .drop-zone {
         padding: 42px 15px;
     }
 
+
     .result-header {
         align-items: flex-start;
+
         flex-direction: column;
     }
+
 
     .brand h1 {
         font-size: 18px;
     }
+
+
+    .select-video-button {
+        padding: 14px 24px;
+
+        font-size: 16px;
+
+        min-width: 150px;
+
+        text-align: center;
+    }
+
 }
