@@ -1,13 +1,15 @@
 from pathlib import Path
 
-from faster_whisper import WhisperModel
+from faster_whisper import (
+    WhisperModel,
+)
 
 
 class TranscriptionEngine:
 
     def __init__(
         self,
-        model_size: str = "tiny"
+        model_size="tiny",
     ):
 
         self.model_size = model_size
@@ -20,33 +22,34 @@ class TranscriptionEngine:
             self.model = WhisperModel(
                 self.model_size,
                 device="cpu",
-                compute_type="int8"
+                compute_type="int8",
             )
 
         return self.model
 
     def transcribe(
         self,
-        audio_path: str | Path
-    ) -> dict:
+        audio_path,
+    ):
 
-        audio_path = Path(audio_path)
+        path = Path(audio_path)
 
-        if not audio_path.exists():
+        if not path.exists():
+
             raise FileNotFoundError(
-                f"Audio file not found: {audio_path}"
+                f"Audio file not found: {path}"
             )
 
         model = self.load_model()
 
         segments, info = model.transcribe(
-            str(audio_path),
+            str(path),
             beam_size=5,
-            vad_filter=True
+            vad_filter=True,
         )
 
         result_segments = []
-        full_text = []
+        texts = []
 
         for segment in segments:
 
@@ -56,25 +59,30 @@ class TranscriptionEngine:
                 continue
 
             result_segments.append({
-                "start": float(segment.start),
-                "end": float(segment.end),
-                "text": text
+                "start": float(
+                    segment.start
+                ),
+                "end": float(
+                    segment.end
+                ),
+                "text": text,
             })
 
-            full_text.append(text)
+            texts.append(text)
 
         return {
             "success": True,
             "language": info.language,
-            "language_probability":
-                float(info.language_probability),
-            "text": " ".join(full_text),
+            "language_probability": float(
+                info.language_probability
+            ),
+            "text": " ".join(texts),
             "segments": result_segments,
             "engine": "faster-whisper",
-            "model": self.model_size
+            "model": self.model_size,
         }
 
 
-transcription_engine = TranscriptionEngine(
-    model_size="tiny"
+transcription_engine = (
+    TranscriptionEngine("tiny")
 )
