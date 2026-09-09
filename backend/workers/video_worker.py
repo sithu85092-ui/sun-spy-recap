@@ -4,6 +4,8 @@ from pathlib import Path
 
 from backend.database import get_job, update_job
 from backend.services.processor import inspect_video
+from backend.services.analyzer import choose_highlight
+from backend.services.clipper import create_highlight_clip
 
 
 def now():
@@ -20,6 +22,11 @@ async def process_video(job_id: str):
     input_file = Path(job["input_file"])
 
     try:
+
+        # ==========================
+        # 1. PROCESSING
+        # ==========================
+
         update_job(
             job_id,
             status="PROCESSING",
@@ -28,11 +35,11 @@ async def process_video(job_id: str):
             updated_at=now()
         )
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
-        # --------------------------------
-        # STEP 1: Inspect Video
-        # --------------------------------
+        # ==========================
+        # 2. VIDEO INSPECTION
+        # ==========================
 
         update_job(
             job_id,
@@ -47,41 +54,54 @@ async def process_video(job_id: str):
         if not info["success"]:
             raise RuntimeError(info["error"])
 
-        await asyncio.sleep(0.5)
+        duration = info["duration"]
 
-        # --------------------------------
-        # STEP 2: AI Analysis
-        # --------------------------------
+        # ==========================
+        # 3. HIGHLIGHT DETECTION
+        # ==========================
 
         update_job(
             job_id,
             status="ANALYZING",
             progress=30,
-            message="Analyzing video...",
+            message="Finding the most interesting scene...",
             updated_at=now()
         )
 
-        # AI analyzer will be connected here.
-        await asyncio.sleep(1)
+        clip_duration = min(
+            30.0,
+            max(5.0, duration)
+        )
 
-        # --------------------------------
-        # STEP 3: Highlight Detection
-        # --------------------------------
+        highlight = choose_highlight(
+            input_file,
+            clip_duration=clip_duration
+        )
+
+        # ==========================
+        # 4. AUTO CLIP
+        # ==========================
 
         update_job(
             job_id,
             status="CLIPPING",
             progress=45,
-            message="Finding the best scene...",
+            message="Creating highlight clip...",
             updated_at=now()
         )
 
-        # Highlight engine will be connected here.
-        await asyncio.sleep(1)
+        clip_name = f"{job_id}_highlight.mp4"
 
-        # --------------------------------
-        # STEP 4: Narration
-        # --------------------------------
+        clip_path = create_highlight_clip(
+            video_path=input_file,
+            start=highlight["start"],
+            duration=highlight["duration"],
+            output_name=clip_name
+        )
+
+        # ==========================
+        # 5. NARRATION
+        # ==========================
 
         update_job(
             job_id,
@@ -91,48 +111,46 @@ async def process_video(job_id: str):
             updated_at=now()
         )
 
-        # Burmese AI narration will be connected here.
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
-        # --------------------------------
-        # STEP 5: Subtitles
-        # --------------------------------
+        # ==========================
+        # 6. SUBTITLES
+        # ==========================
 
         update_job(
             job_id,
             status="SUBTITLING",
             progress=75,
-            message="Creating subtitles...",
+            message="Preparing subtitles...",
             updated_at=now()
         )
 
-        # Subtitle engine will be connected here.
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
-        # --------------------------------
-        # STEP 6: Rendering
-        # --------------------------------
+        # ==========================
+        # 7. RENDERING
+        # ==========================
 
         update_job(
             job_id,
             status="RENDERING",
             progress=90,
-            message="Rendering 9:16 video...",
+            message="Rendering final video...",
             updated_at=now()
         )
 
-        # Final renderer will be connected here.
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
-        # --------------------------------
-        # COMPLETE
-        # --------------------------------
+        # ==========================
+        # 8. COMPLETED
+        # ==========================
 
         update_job(
             job_id,
             status="COMPLETED",
             progress=100,
-            message="Recap completed successfully.",
+            message="Highlight created successfully.",
+            output_file=str(clip_path),
             updated_at=now()
         )
 
