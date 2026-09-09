@@ -1,217 +1,455 @@
 import asyncio
-import os
 
-from ..database import SessionLocal
-from ..services.job_service import (
-    get_job,
-    update_job,
+from pathlib import Path
+
+from backend.config import TEMP_DIR
+from backend.database import (
+    SessionLocal,
+    utcnow,
+)
+from backend.models import Job
+
+from backend.services.processor import (
+    inspect_video,
+    prepare_audio,
+)
+
+from backend.services.transcription import (
+    transcription_engine,
+)
+
+from backend.services.analyzer import (
+    choose_highlight,
+)
+
+from backend.services.clipper import (
+    create_highlight_clip,
+)
+
+from backend.services.narrator import (
+    narrator,
+)
+
+from backend.services.tts import (
+    synthesize,
+)
+
+from backend.services.subtitles import (
+    create_srt,
+)
+
+from backend.services.renderer import (
+    render_final,
 )
 
 
-def update_progress(
+def update_job(
     job_id,
-    progress,
-    message,
-    status="PROCESSING",
+    *,
+    status=None,
+    progress=None,
+    message=None,
+    output_file=None,
+    error=None,
+    recap_text=None,
+    language=None,
 ):
+
     db = SessionLocal()
 
     try:
-        update_job(
-            db,
-            job_id,
-            progress=progress,
-            message=message,
-            status=status,
+
+        job = (
+            db.query(Job)
+            .filter(Job.id == job_id)
+            .first()
         )
+
+        if job is None:
+            return
+
+        if status is not None:
+            job.status = status
+
+        if progress is not None:
+            job.progress = progress
+
+        if message is not None:
+            job.message = message
+
+        if output_file is not None:
+            job.output_file = output_file
+
+        if error is not None:
+            job.error = error
+
+        if recap_text is not None:
+            job.recap_text = recap_text
+
+        if language is not None:
+            job.language = language
+
+        job.updated_at = utcnow()
+
+        db.commit()
+
+    except Exception:
+
+        db.rollback()
+        raise
+
     finally:
+
         db.close()
 
 
-async def process_video(job_id: str):
+def get_job(job_id):
 
     db = SessionLocal()
 
     try:
-        job = get_job(db, job_id)
 
-        if not job:
-            return
+        job = (
+            db.query(Job)
+            .filter(Job.id == job_id)
+            .first()
+        )
 
-        input_file = job.input_file
+        if job is None:
+            return None
+
+        return {
+            "id": job.id,
+            "upload_id": job.upload_id,
+            "status": job.status,
+            "progress": job.progress,
+            "message": job.message,
+            "input_file": job.input_file,
+            "output_file": job.output_file,
+            "error": job.error,
+            "recap_text": job.recap_text,
+            "language": job.language,
+        }
+
+    finally:
+
+        db.close()
+
+
+async def process_video(job_id):
+
+    job = get_job(job_id)
+
+    if job is None:
+        return
+
+    input_file = Path(
+        job["input_file"]
+    )
+
+    try:
+
+        # =================================
+        # 1. INSPECT
+        # =================================
 
         update_job(
-            db,
             job_id,
             status="PROCESSING",
             progress=5,
             message="Inspecting video...",
         )
 
-        # Import existing services here
-        from ..services.extractor import extract_audio
-        from ..services.whisper_service import transcribe
-        from ..services.analyzer import choose_highlight
-        from ..services.clipper import create_clip
-        from ..services.recap_service import generate_recap
-        from ..services.tts import synthesize
-        from ..services.subtitle import create_subtitles
-        from ..services.renderer import render_vertical
-
-        # --------------------------------
-        # 1. Extract audio
-        # --------------------------------
-
-        update_progress(
-            job_id,
-            15,
-            "Extracting audio...",
-        )
-
-        audio_file = await asyncio.to_thread(
-            extract_audio,
+        info = await asyncio.to_thread(
+            inspect_video,
             input_file,
         )
 
-        # --------------------------------
-        # 2. Whisper
-        # --------------------------------
+        if not info.get("success"):
 
-        update_progress(
-            job_id,
-            30,
-            "Transcribing audio...",
-        )
-
-        transcript = await asyncio.to_thread(
-            transcribe,
-            audio_file,
-        )
-
-        # --------------------------------
-        # 3. Find highlight
-        # --------------------------------
-
-        update_progress(
-            job_id,
-            45,
-            "Finding the best scene...",
-        )
-
-        highlight = await asyncio.to_thread(
-            choose_highlight,
-            transcript,
-        )
-
-        # --------------------------------
-        # 4. Clip
-        # --------------------------------
-
-        update_progress(
-            job_id,
-            55,
-            "Creating highlight clip...",
-        )
-
-        clip_file = await asyncio.to_thread(
-            create_clip,
-            input_file,
-            highlight,
-        )
-
-        # --------------------------------
-        # 5. Burmese recap
-        # --------------------------------
-
-        update_progress(
-            job_id,
-            65,
-            "Creating Burmese recap...",
-        )
-
-        recap_text = await asyncio.to_thread(
-            generate_recap,
-            transcript,
-        )
-
-        # --------------------------------
-        # 6. TTS
-        # --------------------------------
-
-        update_progress(
-            job_id,
-            72,
-            "Generating Burmese narration...",
-        )
-
-        tts_file = await synthesize(
-            recap_text,
-            "data/narration.mp3",
-        )
-
-        # --------------------------------
-        # 7. Subtitles
-        # --------------------------------
-
-        update_progress(
-            job_id,
-            80,
-            "Creating subtitles...",
-        )
-
-        subtitle_file = await asyncio.to_thread(
-            create_subtitles,
-            recap_text,
-        )
-
-        # --------------------------------
-        # 8. Render 9:16
-        # --------------------------------
-
-        update_progress(
-            job_id,
-            88,
-            "Rendering 9:16 video...",
-        )
-
-        output_file = await asyncio.to_thread(
-            render_vertical,
-            clip_file,
-            tts_file,
-            subtitle_file,
-        )
-
-        # --------------------------------
-        # 9. Complete
-        # --------------------------------
-
-        db = SessionLocal()
-
-        try:
-            update_job(
-                db,
-                job_id,
-                status="COMPLETED",
-                progress=100,
-                message="Video processing completed.",
-                output_file=str(output_file),
-                recap_text=recap_text,
+            raise RuntimeError(
+                info.get(
+                    "error",
+                    "Video inspection failed.",
+                )
             )
-        finally:
-            db.close()
+
+        duration = float(
+            info.get(
+                "duration",
+                0,
+            )
+        )
+
+        # =================================
+        # 2. AUDIO
+        # =================================
+
+        update_job(
+            job_id,
+            status="TRANSCRIBING",
+            progress=15,
+            message="Extracting audio...",
+        )
+
+        audio_result = (
+            await asyncio.to_thread(
+                prepare_audio,
+                input_file,
+            )
+        )
+
+        if not audio_result.get("success", True):
+
+            raise RuntimeError(
+                audio_result.get(
+                    "error",
+                    "Audio extraction failed.",
+                )
+            )
+
+        audio_file = Path(
+            audio_result["audio_file"]
+        )
+
+        # =================================
+        # 3. WHISPER
+        # =================================
+
+        update_job(
+            job_id,
+            status="TRANSCRIBING",
+            progress=30,
+            message=(
+                "Transcribing speech "
+                "with Whisper..."
+            ),
+        )
+
+        transcription = (
+            await asyncio.to_thread(
+                transcription_engine.transcribe,
+                audio_file,
+            )
+        )
+
+        if not transcription.get(
+            "success"
+        ):
+
+            raise RuntimeError(
+                transcription.get(
+                    "error",
+                    "Transcription failed.",
+                )
+            )
+
+        transcript = (
+            transcription.get(
+                "text",
+                "",
+            )
+            .strip()
+        )
+
+        segments = transcription.get(
+            "segments",
+            [],
+        )
+
+        if not transcript:
+
+            raise RuntimeError(
+                "No speech was detected in the video."
+            )
+
+        # =================================
+        # 4. HIGHLIGHT
+        # =================================
+
+        update_job(
+            job_id,
+            status="ANALYZING",
+            progress=45,
+            message="Finding the best scene...",
+        )
+
+        clip_duration = min(
+            30.0,
+            max(
+                5.0,
+                duration,
+            ),
+        )
+
+        highlight = (
+            await asyncio.to_thread(
+                choose_highlight,
+                input_file,
+                clip_duration,
+                segments,
+            )
+        )
+
+        if not highlight:
+
+            raise RuntimeError(
+                "Could not find a suitable highlight."
+            )
+
+        # =================================
+        # 5. CLIP
+        # =================================
+
+        update_job(
+            job_id,
+            status="CLIPPING",
+            progress=55,
+            message="Creating highlight clip...",
+        )
+
+        clip_path = (
+            await asyncio.to_thread(
+                create_highlight_clip,
+                input_file,
+                highlight["start"],
+                highlight["duration"],
+                f"{job_id}_highlight.mp4",
+            )
+        )
+
+        # =================================
+        # 6. BURMESE RECAP
+        # =================================
+
+        update_job(
+            job_id,
+            status="NARRATING",
+            progress=65,
+            message="Creating Burmese recap...",
+        )
+
+        recap = (
+            await asyncio.to_thread(
+                narrator.create_recap,
+                transcript,
+            )
+        )
+
+        if not recap.get("success"):
+
+            raise RuntimeError(
+                recap.get(
+                    "error",
+                    "Recap creation failed.",
+                )
+            )
+
+        recap_text = (
+            recap.get(
+                "text",
+                "",
+            )
+            .strip()
+        )
+
+        if not recap_text:
+
+            raise RuntimeError(
+                "AI recap returned empty text."
+            )
+
+        # =================================
+        # 7. BURMESE TTS
+        # =================================
+
+        update_job(
+            job_id,
+            status="NARRATING",
+            progress=72,
+            message="Generating Burmese voice...",
+        )
+
+        narration_path = (
+            TEMP_DIR /
+            f"{job_id}_narration.mp3"
+        )
+
+        await synthesize(
+            recap_text,
+            narration_path,
+        )
+
+        # =================================
+        # 8. SUBTITLES
+        # =================================
+
+        update_job(
+            job_id,
+            status="SUBTITLING",
+            progress=80,
+            message="Creating subtitles...",
+        )
+
+        subtitle_path = (
+            TEMP_DIR /
+            f"{job_id}.srt"
+        )
+
+        create_srt(
+            segments,
+            subtitle_path,
+        )
+
+        # =================================
+        # 9. FINAL 9:16
+        # =================================
+
+        update_job(
+            job_id,
+            status="RENDERING",
+            progress=88,
+            message="Rendering final 9:16 video...",
+        )
+
+        final_path = (
+            await asyncio.to_thread(
+                render_final,
+                clip_path,
+                narration_path,
+                subtitle_path,
+                f"{job_id}_final.mp4",
+            )
+        )
+
+        # =================================
+        # 10. COMPLETE
+        # =================================
+
+        update_job(
+            job_id,
+            status="COMPLETED",
+            progress=100,
+            message="Final recap created successfully.",
+            output_file=str(final_path),
+            recap_text=recap_text,
+            language=transcription.get(
+                "language",
+                "my",
+            ),
+        )
 
     except Exception as error:
 
-        db = SessionLocal()
+        print(
+            f"[JOB FAILED] {job_id}: {error}",
+            flush=True,
+        )
 
-        try:
-            update_job(
-                db,
-                job_id,
-                status="FAILED",
-                progress=0,
-                message="Video processing failed.",
-                error=str(error),
-            )
-        finally:
-            db.close()
+        update_job(
+            job_id,
+            status="FAILED",
+            progress=0,
+            message="Video processing failed.",
+            error=str(error),
+        )
