@@ -1,53 +1,77 @@
-from typing import Optional
+import re
 
 
 class BurmeseNarrator:
 
     def __init__(self):
 
-        self.engine = "local"
+        self.engine = (
+            "extractive-local"
+        )
 
     def create_recap(
         self,
-        transcript: str,
-        max_length: int = 500
-    ) -> dict:
+        transcript,
+        max_length=700,
+    ):
 
-        transcript = (
+        text = (
             transcript or ""
         ).strip()
 
-        if not transcript:
+        if not text:
 
             return {
                 "success": False,
                 "language": "my",
                 "text": "",
-                "error": "Transcript is empty",
-                "engine": self.engine
+                "error": (
+                    "Transcript is empty"
+                ),
+                "engine": self.engine,
             }
 
+        sentences = re.split(
+            r"(?<=[.!?။])\s+",
+            text,
+        )
 
-        # -------------------------------------------------
-        # Temporary Burmese recap engine
-        # -------------------------------------------------
-        #
-        # The real local LLM summarizer will be connected
-        # in the next AI-model phase.
-        #
-        # Keep this interface stable so the worker/API
-        # does not need to change later.
-        # -------------------------------------------------
+        sentences = [
+            sentence.strip()
+            for sentence in sentences
+            if sentence.strip()
+        ]
 
-        text = transcript[:max_length]
+        selected = sentences[:8]
 
+        recap = " ".join(
+            selected
+        )
+
+        if len(recap) > max_length:
+
+            recap = (
+                recap[:max_length]
+                .rsplit(" ", 1)[0]
+                .strip()
+                + "…"
+            )
+
+        has_burmese = any(
+            "\u1000" <= char <= "\u109f"
+            for char in recap
+        )
 
         return {
             "success": True,
-            "language": "my",
-            "text": text,
-            "source_text": transcript,
-            "engine": self.engine
+            "language": (
+                "my"
+                if has_burmese
+                else "auto"
+            ),
+            "text": recap,
+            "source_text": text,
+            "engine": self.engine,
         }
 
 
