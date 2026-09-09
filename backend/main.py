@@ -13,29 +13,29 @@ from backend.api.files import router as files_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
     init_database()
+
     yield
 
 
 app = FastAPI(
     title="SUN SPY RECAP API",
-    version="1.0.0",
-    description="Professional AI Video Recap API",
+    version="2.0.0",
+    description="AI Video Recap Pipeline",
     lifespan=lifespan,
 )
 
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# API Routers
 app.include_router(upload_router)
 app.include_router(jobs_router)
 app.include_router(recap_router)
@@ -44,18 +44,24 @@ app.include_router(files_router)
 
 @app.get("/")
 async def root():
+
     return {
         "name": "SUN SPY RECAP",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "status": "online",
-        "message": "Upload • Discover • Recap",
+        "pipeline": (
+            "upload -> whisper -> "
+            "highlight -> recap -> "
+            "tts -> subtitles -> 9:16"
+        ),
     }
 
 
 @app.get("/api/health")
 async def health():
+
     return {
         "status": "ok",
         "service": "SUN SPY RECAP API",
-        "version": "1.0.0",
+        "version": "2.0.0",
     }
