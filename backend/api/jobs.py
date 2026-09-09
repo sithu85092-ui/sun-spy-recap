@@ -1,23 +1,28 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import (
+    APIRouter,
+    HTTPException,
+)
 
 from backend.database import get_job
 
 
 router = APIRouter(
     prefix="/api",
-    tags=["Jobs"]
+    tags=["Jobs"],
 )
 
 
 @router.get("/status/{job_id}")
-async def get_job_status(job_id: str):
+async def get_job_status(
+    job_id: str,
+):
 
     job = get_job(job_id)
 
     if job is None:
         raise HTTPException(
-            status_code=404,
-            detail="Job not found"
+            404,
+            "Job not found",
         )
 
     return {
@@ -31,7 +36,9 @@ async def get_job_status(job_id: str):
             "input_file": job["input_file"],
             "output_file": job["output_file"],
             "error": job["error"],
+            "recap_text": job["recap_text"],
+            "language": job["language"],
             "created_at": job["created_at"],
-            "updated_at": job["updated_at"]
-        }
+            "updated_at": job["updated_at"],
+        },
     }
