@@ -27,56 +27,85 @@ const fileInfo =
     document.getElementById("fileInfo");
 
 const inputPreviewContainer =
-    document.getElementById("inputPreviewContainer");
+    document.getElementById(
+        "inputPreviewContainer"
+    );
 
 const inputPreview =
     document.getElementById("inputPreview");
 
 const progressContainer =
-    document.getElementById("progressContainer");
+    document.getElementById(
+        "progressContainer"
+    );
 
 const progressBar =
-    document.getElementById("progressBar");
+    document.getElementById(
+        "progressBar"
+    );
 
 const progressPercent =
-    document.getElementById("progressPercent");
+    document.getElementById(
+        "progressPercent"
+    );
 
 const progressText =
-    document.getElementById("progressText");
+    document.getElementById(
+        "progressText"
+    );
 
 const statusBox =
     document.getElementById("statusBox");
 
 const resultSection =
-    document.getElementById("resultSection");
+    document.getElementById(
+        "resultSection"
+    );
 
 const resultVideo =
-    document.getElementById("resultVideo");
+    document.getElementById(
+        "resultVideo"
+    );
 
 const downloadButton =
-    document.getElementById("downloadButton");
+    document.getElementById(
+        "downloadButton"
+    );
 
 const recapText =
-    document.getElementById("recapText");
+    document.getElementById(
+        "recapText"
+    );
 
 
 // =====================================================
 // STATUS
 // =====================================================
 
-function showStatus(message, type = "") {
+function showStatus(
+    message,
+    type = ""
+) {
 
-    if (!statusBox) return;
-
-    statusBox.className = "status-box";
-
-    if (type) {
-        statusBox.classList.add(type);
+    if (!statusBox) {
+        return;
     }
 
-    statusBox.classList.remove("hidden");
+    statusBox.className =
+        "status-box";
 
-    statusBox.textContent = message;
+    if (type) {
+        statusBox.classList.add(
+            type
+        );
+    }
+
+    statusBox.classList.remove(
+        "hidden"
+    );
+
+    statusBox.textContent =
+        message;
 }
 
 
@@ -84,28 +113,45 @@ function showStatus(message, type = "") {
 // PROGRESS
 // =====================================================
 
-function setProgress(percent, message) {
+function setProgress(
+    percent,
+    message
+) {
 
-    const value = Math.max(
-        0,
-        Math.min(100, Number(percent) || 0)
-    );
+    const value =
+        Math.max(
+            0,
+            Math.min(
+                100,
+                Number(percent) || 0
+            )
+        );
 
     if (progressContainer) {
-        progressContainer.classList.remove("hidden");
+
+        progressContainer.classList
+            .remove("hidden");
     }
 
     if (progressBar) {
-        progressBar.style.width = `${value}%`;
+
+        progressBar.style.width =
+            `${value}%`;
     }
 
     if (progressPercent) {
+
         progressPercent.textContent =
             `${Math.round(value)}%`;
     }
 
-    if (progressText && message) {
-        progressText.textContent = message;
+    if (
+        progressText &&
+        message
+    ) {
+
+        progressText.textContent =
+            message;
     }
 }
 
@@ -117,14 +163,20 @@ function setProgress(percent, message) {
 function sleep(ms) {
 
     return new Promise(
-        resolve => setTimeout(resolve, ms)
+        resolve =>
+            setTimeout(
+                resolve,
+                ms
+            )
     );
 }
 
 
 function formatBytes(bytes) {
 
-    if (!bytes) return "0 B";
+    if (!bytes) {
+        return "0 B";
+    }
 
     const units = [
         "B",
@@ -133,13 +185,23 @@ function formatBytes(bytes) {
         "GB"
     ];
 
-    const index = Math.floor(
-        Math.log(bytes) / Math.log(1024)
-    );
+    const index =
+        Math.min(
+            Math.floor(
+                Math.log(bytes) /
+                Math.log(1024)
+            ),
+            units.length - 1
+        );
 
     return (
-        (bytes / Math.pow(1024, index))
-        .toFixed(1)
+        (
+            bytes /
+            Math.pow(
+                1024,
+                index
+            )
+        ).toFixed(1)
         + " "
         + units[index]
     );
@@ -149,11 +211,26 @@ function formatBytes(bytes) {
 function escapeHTML(value) {
 
     return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+        .replaceAll(
+            "&",
+            "&amp;"
+        )
+        .replaceAll(
+            "<",
+            "&lt;"
+        )
+        .replaceAll(
+            ">",
+            "&gt;"
+        )
+        .replaceAll(
+            '"',
+            "&quot;"
+        )
+        .replaceAll(
+            "'",
+            "&#039;"
+        );
 }
 
 
@@ -189,9 +266,7 @@ async function requestJSON(
             } catch {
 
                 data = {};
-
             }
-
 
             if (!response.ok) {
 
@@ -203,19 +278,20 @@ async function requestJSON(
                 );
             }
 
-
             return data;
 
         } catch (error) {
 
             lastError = error;
 
-            if (attempt < retries) {
+            if (
+                attempt < retries
+            ) {
 
                 await sleep(
-                    1500 * (attempt + 1)
+                    1500 *
+                    (attempt + 1)
                 );
-
             }
         }
     }
@@ -228,14 +304,16 @@ async function requestJSON(
 // SELECT VIDEO
 // =====================================================
 
-if (selectButton && videoInput) {
+if (
+    selectButton &&
+    videoInput
+) {
 
     selectButton.addEventListener(
         "click",
         () => {
 
             videoInput.click();
-
         }
     );
 }
@@ -253,9 +331,7 @@ if (videoInput) {
             if (file) {
 
                 handleFile(file);
-
             }
-
         }
     );
 }
@@ -267,7 +343,11 @@ if (videoInput) {
 
 function handleFile(file) {
 
-    if (!file.type.startsWith("video/")) {
+    if (
+        !file.type.startsWith(
+            "video/"
+        )
+    ) {
 
         showStatus(
             "❌ Please select a video file.",
@@ -277,9 +357,7 @@ function handleFile(file) {
         return;
     }
 
-
     selectedFile = file;
-
 
     if (fileInfo) {
 
@@ -289,15 +367,18 @@ function handleFile(file) {
 
         fileInfo.innerHTML = `
             <strong>
-                ${escapeHTML(file.name)}
+                ${escapeHTML(
+                    file.name
+                )}
             </strong>
             <br>
             <small>
-                ${formatBytes(file.size)}
+                ${formatBytes(
+                    file.size
+                )}
             </small>
         `;
     }
-
 
     if (
         inputPreview &&
@@ -305,7 +386,9 @@ function handleFile(file) {
     ) {
 
         const url =
-            URL.createObjectURL(file);
+            URL.createObjectURL(
+                file
+            );
 
         inputPreview.src = url;
 
@@ -314,21 +397,19 @@ function handleFile(file) {
             .remove("hidden");
     }
 
-
     if (uploadButton) {
 
-        uploadButton.disabled = false;
+        uploadButton.disabled =
+            false;
 
         uploadButton.textContent =
             "🚀 Start AI Recap";
     }
 
-
     showStatus(
         "✅ Video selected. Press Start AI Recap.",
         "success"
     );
-
 
     setProgress(
         0,
@@ -352,10 +433,8 @@ if (dropZone) {
             dropZone.classList.add(
                 "dragging"
             );
-
         }
     );
-
 
     dropZone.addEventListener(
         "dragleave",
@@ -364,10 +443,8 @@ if (dropZone) {
             dropZone.classList.remove(
                 "dragging"
             );
-
         }
     );
-
 
     dropZone.addEventListener(
         "drop",
@@ -379,18 +456,14 @@ if (dropZone) {
                 "dragging"
             );
 
-
             const file =
                 event.dataTransfer
                     .files?.[0];
 
-
             if (file) {
 
                 handleFile(file);
-
             }
-
         }
     );
 }
@@ -416,12 +489,11 @@ if (uploadButton) {
                 return;
             }
 
-
-            uploadButton.disabled = true;
+            uploadButton.disabled =
+                true;
 
             uploadButton.textContent =
                 "⏳ Processing...";
-
 
             if (resultSection) {
 
@@ -429,7 +501,6 @@ if (uploadButton) {
                     .classList
                     .add("hidden");
             }
-
 
             try {
 
@@ -444,9 +515,7 @@ if (uploadButton) {
                     error
                 );
 
-
                 stopPolling();
-
 
                 showStatus(
                     `❌ ${
@@ -456,14 +525,12 @@ if (uploadButton) {
                     "error"
                 );
 
-
                 uploadButton.disabled =
                     false;
 
                 uploadButton.textContent =
                     "🚀 Try Again";
             }
-
         }
     );
 }
@@ -473,13 +540,14 @@ if (uploadButton) {
 // MAIN PROCESS
 // =====================================================
 
-async function processVideo(file) {
+async function processVideo(
+    file
+) {
 
     setProgress(
         2,
         "Connecting to SUN SPY server..."
     );
-
 
     showStatus(
         "🤖 Starting AI video analysis..."
@@ -516,22 +584,18 @@ async function processVideo(file) {
         "Preparing video upload..."
     );
 
-
     const initForm =
         new FormData();
-
 
     initForm.append(
         "filename",
         file.name
     );
 
-
     initForm.append(
         "file_size",
         file.size
     );
-
 
     const initData =
         await requestJSON(
@@ -543,10 +607,8 @@ async function processVideo(file) {
             3
         );
 
-
     const uploadId =
         initData.upload_id;
-
 
     if (!uploadId) {
 
@@ -554,7 +616,6 @@ async function processVideo(file) {
             "Server did not return upload ID."
         );
     }
-
 
     console.log(
         "UPLOAD ID:",
@@ -568,9 +629,9 @@ async function processVideo(file) {
 
     const totalChunks =
         Math.ceil(
-            file.size / CHUNK_SIZE
+            file.size /
+            CHUNK_SIZE
         );
-
 
     for (
         let index = 0;
@@ -579,15 +640,15 @@ async function processVideo(file) {
     ) {
 
         const start =
-            index * CHUNK_SIZE;
-
+            index *
+            CHUNK_SIZE;
 
         const end =
             Math.min(
-                start + CHUNK_SIZE,
+                start +
+                CHUNK_SIZE,
                 file.size
             );
-
 
         const chunk =
             file.slice(
@@ -595,9 +656,8 @@ async function processVideo(file) {
                 end
             );
 
-
-        let success = false;
-
+        let success =
+            false;
 
         for (
             let attempt = 0;
@@ -610,25 +670,21 @@ async function processVideo(file) {
                 const form =
                     new FormData();
 
-
                 form.append(
                     "upload_id",
                     uploadId
                 );
-
 
                 form.append(
                     "chunk_index",
                     index
                 );
 
-
                 form.append(
                     "chunk",
                     chunk,
                     file.name
                 );
-
 
                 await requestJSON(
                     `${API_URL}/api/upload/chunk`,
@@ -639,11 +695,9 @@ async function processVideo(file) {
                     0
                 );
 
-
                 success = true;
 
                 break;
-
 
             } catch (error) {
 
@@ -653,15 +707,16 @@ async function processVideo(file) {
                     error
                 );
 
+                if (
+                    attempt < 2
+                ) {
 
-                if (attempt < 2) {
-
-                    await sleep(2000);
-
+                    await sleep(
+                        2000
+                    );
                 }
             }
         }
-
 
         if (!success) {
 
@@ -672,14 +727,15 @@ async function processVideo(file) {
             );
         }
 
-
         const percent =
             5 +
             (
-                (index + 1) /
+                (
+                    index + 1
+                ) /
                 totalChunks
-            ) * 30;
-
+            ) *
+            30;
 
         setProgress(
             percent,
@@ -691,36 +747,31 @@ async function processVideo(file) {
 
 
     // ---------------------------------
-    // COMPLETE
+    // COMPLETE UPLOAD
     // ---------------------------------
 
     setProgress(
         38,
-        "Combining video chunks..."
+        "Uploading video to secure storage..."
     );
-
 
     const completeForm =
         new FormData();
-
 
     completeForm.append(
         "upload_id",
         uploadId
     );
 
-
     completeForm.append(
         "filename",
         file.name
     );
 
-
     completeForm.append(
         "total_chunks",
         totalChunks
     );
-
 
     const completeData =
         await requestJSON(
@@ -732,14 +783,14 @@ async function processVideo(file) {
             3
         );
 
-
-    if (!completeData.filename) {
+    if (
+        !completeData.filename
+    ) {
 
         throw new Error(
             "Server could not complete upload."
         );
     }
-
 
     console.log(
         "UPLOAD COMPLETE:",
@@ -756,11 +807,9 @@ async function processVideo(file) {
         "Starting AI video analysis..."
     );
 
-
     showStatus(
         "🧠 AI is analyzing the entire video..."
     );
-
 
     const recapData =
         await requestJSON(
@@ -787,10 +836,8 @@ async function processVideo(file) {
             3
         );
 
-
     currentJobId =
         recapData.job_id;
-
 
     if (!currentJobId) {
 
@@ -799,12 +846,10 @@ async function processVideo(file) {
         );
     }
 
-
     console.log(
         "JOB ID:",
         currentJobId
     );
-
 
     startPolling(
         currentJobId
@@ -816,11 +861,15 @@ async function processVideo(file) {
 // POLLING
 // =====================================================
 
-function startPolling(jobId) {
+function startPolling(
+    jobId
+) {
 
     stopPolling();
 
-    checkJobStatus(jobId);
+    checkJobStatus(
+        jobId
+    );
 }
 
 
@@ -841,7 +890,9 @@ function stopPolling() {
 // CHECK STATUS
 // =====================================================
 
-async function checkJobStatus(jobId) {
+async function checkJobStatus(
+    jobId
+) {
 
     try {
 
@@ -854,20 +905,13 @@ async function checkJobStatus(jobId) {
                 2
             );
 
-
         console.log(
             "STATUS RESPONSE:",
             data
         );
 
-
-        // IMPORTANT:
-        // Backend returns:
-        // { success: true, job: {...} }
-
         const job =
             data.job || data;
-
 
         if (!job) {
 
@@ -876,23 +920,19 @@ async function checkJobStatus(jobId) {
             );
         }
 
-
         const status =
             String(
                 job.status || ""
             ).toUpperCase();
-
 
         const progress =
             Number(
                 job.progress ?? 0
             );
 
-
         const message =
             job.message ||
             "Processing video...";
-
 
         setProgress(
             progress,
@@ -912,31 +952,25 @@ async function checkJobStatus(jobId) {
 
             stopPolling();
 
-
             setProgress(
                 100,
                 "Complete!"
             );
-
 
             showStatus(
                 "🎉 Your AI recap is ready!",
                 "success"
             );
 
-
             showResult(
                 job
             );
 
-
             uploadButton.disabled =
                 false;
 
-
             uploadButton.textContent =
                 "🚀 Start Another Recap";
-
 
             return;
         }
@@ -953,32 +987,26 @@ async function checkJobStatus(jobId) {
 
             stopPolling();
 
-
             const error =
                 job.error ||
                 job.message ||
                 "Video processing failed.";
-
 
             console.error(
                 "BACKEND ERROR:",
                 error
             );
 
-
             showStatus(
                 `❌ ${error}`,
                 "error"
             );
 
-
             uploadButton.disabled =
                 false;
 
-
             uploadButton.textContent =
                 "🚀 Try Again";
-
 
             return;
         }
@@ -997,7 +1025,6 @@ async function checkJobStatus(jobId) {
                 3000
             );
 
-
     } catch (error) {
 
         console.error(
@@ -1005,11 +1032,9 @@ async function checkJobStatus(jobId) {
             error
         );
 
-
         showStatus(
             "⏳ Checking server... retrying..."
         );
-
 
         pollingTimer =
             setTimeout(
@@ -1027,7 +1052,9 @@ async function checkJobStatus(jobId) {
 // RESULT
 // =====================================================
 
-function showResult(job) {
+function showResult(
+    job
+) {
 
     if (!resultSection) {
 
@@ -1038,46 +1065,104 @@ function showResult(job) {
         return;
     }
 
-
     resultSection
         .classList
         .remove("hidden");
 
 
-    const filename =
+    // =================================
+    // B2 PRESIGNED URL
+    // =================================
+
+    const videoURL =
         job.output_file ||
-        job.output_filename ||
-        job.result_file ||
-        job.result_filename;
+        job.output_url ||
+        null;
 
 
-    if (filename) {
+    if (!videoURL) {
 
-        const videoURL =
-            `${API_URL}/api/files/${encodeURIComponent(
-                filename
-            )}`;
+        console.error(
+            "No B2 output URL:",
+            job
+        );
 
+        showStatus(
+            "❌ Final video URL was not returned by the server.",
+            "error"
+        );
 
-        if (resultVideo) {
-
-            resultVideo.src =
-                videoURL;
-
-            resultVideo.load();
-        }
-
-
-        if (downloadButton) {
-
-            downloadButton.href =
-                videoURL;
-
-            downloadButton.download =
-                filename;
-        }
+        return;
     }
 
+
+    if (
+        !String(videoURL)
+            .startsWith("http")
+    ) {
+
+        console.error(
+            "Invalid B2 URL:",
+            videoURL
+        );
+
+        showStatus(
+            "❌ Invalid final video URL.",
+            "error"
+        );
+
+        return;
+    }
+
+
+    console.log(
+        "B2 VIDEO URL:",
+        videoURL
+    );
+
+
+    // =================================
+    // VIDEO PLAYER
+    // =================================
+
+    if (resultVideo) {
+
+        resultVideo.src =
+            videoURL;
+
+        resultVideo.controls =
+            true;
+
+        resultVideo.preload =
+            "metadata";
+
+        resultVideo.load();
+    }
+
+
+    // =================================
+    // DOWNLOAD
+    // =================================
+
+    if (downloadButton) {
+
+        downloadButton.href =
+            videoURL;
+
+        downloadButton.target =
+            "_blank";
+
+        downloadButton.rel =
+            "noopener noreferrer";
+
+        downloadButton.download =
+            "sun-spy-recap.mp4";
+    }
+
+
+    // =================================
+    // RECAP TEXT
+    // =================================
 
     if (recapText) {
 
@@ -1100,12 +1185,17 @@ function showResult(job) {
 
 if (uploadButton) {
 
-    uploadButton.disabled = true;
+    uploadButton.disabled =
+        true;
 
     uploadButton.textContent =
         "🚀 Start AI Recap";
 }
 
+
+// =====================================================
+// STARTUP LOG
+// =====================================================
 
 console.log(
     "☀️ SUN SPY RECAP loaded"
@@ -1114,4 +1204,9 @@ console.log(
 console.log(
     "API:",
     API_URL
+);
+
+console.log(
+    "Storage:",
+    "Backblaze B2"
 );
