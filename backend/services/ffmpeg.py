@@ -11,22 +11,21 @@ from backend.config import (
 
 
 def ffmpeg_available():
-
-    return shutil.which(
-        "ffmpeg"
-    ) is not None
+    return shutil.which("ffmpeg") is not None
 
 
 def ffprobe_available():
-
-    return shutil.which(
-        "ffprobe"
-    ) is not None
+    return shutil.which("ffprobe") is not None
 
 
 def _run(command):
+    print(
+        "[FFMPEG]",
+        " ".join(map(str, command)),
+        flush=True,
+    )
 
-    return subprocess.run(
+    result = subprocess.run(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -34,13 +33,12 @@ def _run(command):
         check=True,
     )
 
+    return result
 
-def get_duration(
-    video_path,
-):
+
+def get_duration(video_path):
 
     if not ffprobe_available():
-
         raise RuntimeError(
             "ffprobe is not installed"
         )
@@ -55,9 +53,7 @@ def get_duration(
         str(video_path),
     ])
 
-    data = json.loads(
-        result.stdout
-    )
+    data = json.loads(result.stdout)
 
     return float(
         data["format"]["duration"]
@@ -70,14 +66,17 @@ def extract_audio(
 ):
 
     if not ffmpeg_available():
-
         raise RuntimeError(
             "FFmpeg is not installed"
         )
 
+    TEMP_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
     output_path = (
-        TEMP_DIR /
-        output_name
+        TEMP_DIR / output_name
     )
 
     _run([
@@ -95,6 +94,16 @@ def extract_audio(
         str(output_path),
     ])
 
+    if not output_path.exists():
+        raise RuntimeError(
+            "Audio extraction failed."
+        )
+
+    if output_path.stat().st_size < 1000:
+        raise RuntimeError(
+            "Extracted audio is empty."
+        )
+
     return output_path
 
 
@@ -106,35 +115,67 @@ def cut_clip(
 ):
 
     if not ffmpeg_available():
-
         raise RuntimeError(
             "FFmpeg is not installed"
         )
 
-    output_path = (
-        OUTPUT_DIR /
-        output_name
+    OUTPUT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
     )
 
+    output_path = (
+        OUTPUT_DIR / output_name
+    )
+
+    start = max(
+        0.0,
+        float(start),
+    )
+
+    duration = max(
+        1.0,
+        float(duration),
+    )
+
+    # Fast clip extraction.
+    # No video re-encoding here.
     _run([
         "ffmpeg",
         "-y",
         "-ss",
-        str(max(0, start)),
+        str(start),
         "-i",
         str(video_path),
         "-t",
-        str(max(1, duration)),
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-c:a",
-        "aac",
+        str(duration),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c",
+        "copy",
+        "-avoid_negative_ts",
+        "make_zero",
         "-movflags",
         "+faststart",
         str(output_path),
     ])
+
+    if not output_path.exists():
+        raise RuntimeError(
+            "Highlight clip was not created."
+        )
+
+    if output_path.stat().st_size < 1000:
+        raise RuntimeError(
+            "Highlight clip is empty."
+        )
+
+    print(
+        f"[CLIP OK] {output_path}",
+        flush=True,
+    )
 
     return output_path
 
@@ -147,14 +188,17 @@ def render_vertical_with_audio(
 ):
 
     if not ffmpeg_available():
-
         raise RuntimeError(
             "FFmpeg is not installed"
         )
 
+    OUTPUT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
     output_path = (
-        OUTPUT_DIR /
-        output_name
+        OUTPUT_DIR / output_name
     )
 
     vertical_filter = (
@@ -224,5 +268,20 @@ def render_vertical_with_audio(
     ])
 
     _run(command)
+
+    if not output_path.exists():
+        raise RuntimeError(
+            "Final video was not created."
+        )
+
+    if output_path.stat().st_size < 1000:
+        raise RuntimeError(
+            "Final video is empty."
+        )
+
+    print(
+        f"[FINAL VIDEO OK] {output_path}",
+        flush=True,
+    )
 
     return output_path
