@@ -1,13 +1,11 @@
-from pathlib import Path
-
 from fastapi import (
     APIRouter,
     HTTPException,
 )
 
-from fastapi.responses import FileResponse
-
-from backend.config import OUTPUT_DIR
+from backend.services.b2_storage import (
+    create_download_url,
+)
 
 
 router = APIRouter(
@@ -20,27 +18,38 @@ router = APIRouter(
 async def get_file(
     filename: str,
 ):
-
-    safe_name = Path(
-        filename
-    ).name
-
-    file_path = (
-        OUTPUT_DIR /
-        safe_name
-    )
-
-    if (
-        not file_path.exists()
-        or not file_path.is_file()
-    ):
+    if not filename:
         raise HTTPException(
-            404,
-            "File not found",
+            400,
+            "Filename is required",
         )
 
-    return FileResponse(
-        path=file_path,
-        media_type="video/mp4",
-        filename=file_path.name,
-    )
+    # Frontend should normally use
+    # /api/status/{job_id} output_file.
+    # This endpoint is kept for compatibility.
+
+    object_key = filename
+
+    if not object_key.startswith(
+        "outputs/"
+    ):
+        object_key = (
+            f"outputs/{filename}"
+        )
+
+    try:
+        url = create_download_url(
+            object_key,
+            expires=3600,
+        )
+
+        return {
+            "success": True,
+            "url": url,
+        }
+
+    except Exception as error:
+        raise HTTPException(
+            404,
+            f"File not found: {error}",
+        )
