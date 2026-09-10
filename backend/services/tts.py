@@ -1,6 +1,13 @@
 from pathlib import Path
 import asyncio
+import re
+
 import edge_tts
+
+
+# ==========================================
+# BURMESE MICROSOFT VOICES
+# ==========================================
 
 VOICES = [
     "my-MM-NilarNeural",
@@ -8,7 +15,54 @@ VOICES = [
 ]
 
 
-async def edge_generate(text, output_path, voice):
+# ==========================================
+# BURMESE VALIDATION
+# ==========================================
+
+def has_burmese(text):
+    return any(
+        "\u1000" <= char <= "\u109f"
+        for char in str(text or "")
+    )
+
+
+def clean_text(text):
+    text = str(
+        text or ""
+    ).strip()
+
+    # Remove markdown accidentally returned
+    # by an AI model.
+    text = re.sub(
+        r"\*\*|\*|__|_",
+        "",
+        text,
+    )
+
+    text = text.replace(
+        "```",
+        "",
+    )
+
+    # Remove excessive spaces
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    ).strip()
+
+    return text
+
+
+# ==========================================
+# EDGE TTS
+# ==========================================
+
+async def edge_generate(
+    text,
+    output_path,
+    voice,
+):
     communicator = edge_tts.Communicate(
         text,
         voice,
@@ -17,15 +71,29 @@ async def edge_generate(text, output_path, voice):
         pitch="+0Hz",
     )
 
-    await communicator.save(str(output_path))
+    await communicator.save(
+        str(output_path)
+    )
 
-    if output_path.exists() and output_path.stat().st_size > 1000:
+    if (
+        output_path.exists()
+        and output_path.stat().st_size > 1000
+    ):
         return output_path
 
-    raise RuntimeError("Edge TTS returned an empty audio file.")
+    raise RuntimeError(
+        "Edge TTS returned an empty audio file."
+    )
 
 
-def gtts_generate(text, output_path):
+# ==========================================
+# GOOGLE TTS FALLBACK
+# ==========================================
+
+def gtts_generate(
+    text,
+    output_path,
+):
     from gtts import gTTS
 
     tts = gTTS(
@@ -34,43 +102,102 @@ def gtts_generate(text, output_path):
         slow=False,
     )
 
-    tts.save(str(output_path))
+    tts.save(
+        str(output_path)
+    )
 
-    if output_path.exists() and output_path.stat().st_size > 1000:
+    if (
+        output_path.exists()
+        and output_path.stat().st_size > 1000
+    ):
         return output_path
 
-    raise RuntimeError("gTTS returned an empty audio file.")
+    raise RuntimeError(
+        "gTTS returned an empty audio file."
+    )
 
 
-async def synthesize(text, output_path, voice=None):
-    text = (text or "").strip()
+# ==========================================
+# MAIN TTS FUNCTION
+# ==========================================
+
+async def synthesize(
+    text,
+    output_path,
+    voice=None,
+):
+    text = clean_text(
+        text
+    )
 
     if not text:
-        raise ValueError("Narration text is empty.")
+        raise ValueError(
+            "Narration text is empty."
+        )
 
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # ==========================================
+    # IMPORTANT:
+    # TTS should only receive Burmese narration.
+    # ==========================================
+
+    if not has_burmese(text):
+
+        raise ValueError(
+            "TTS refused non-Burmese narration. "
+            "Narrator must return Burmese text."
+        )
+
+    output_path = Path(
+        output_path
+    )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    # Delete old output
+    if output_path.exists():
+
+        try:
+            output_path.unlink()
+        except Exception:
+            pass
 
     voices = []
 
     if voice:
-        voices.append(voice)
+        voices.append(
+            voice
+        )
 
     for item in VOICES:
+
         if item not in voices:
-            voices.append(item)
+            voices.append(
+                item
+            )
 
     errors = []
 
-    # Try Microsoft Edge TTS
+    # ==========================================
+    # 1. MICROSOFT EDGE TTS
+    # ==========================================
+
     for selected_voice in voices:
-        for attempt in range(1, 4):
+
+        # Only 2 attempts per voice.
+        for attempt in range(1, 3):
+
             try:
+
                 if output_path.exists():
                     output_path.unlink()
 
                 print(
-                    f"TTS Edge: {selected_voice} attempt={attempt}",
+                    f"[TTS] Edge "
+                    f"{selected_voice} "
+                    f"attempt={attempt}",
                     flush=True,
                 )
 
@@ -80,30 +207,52 @@ async def synthesize(text, output_path, voice=None):
                     selected_voice,
                 )
 
-                print("Edge TTS successful.", flush=True)
+                print(
+                    f"[TTS] Edge successful: "
+                    f"{selected_voice}",
+                    flush=True,
+                )
+
+                print(
+                    f"[TTS] Audio size: "
+                    f"{result.stat().st_size} bytes",
+                    flush=True,
+                )
 
                 return result
 
             except Exception as error:
+
                 errors.append(
-                    f"Edge/{selected_voice}: {error}"
+                    f"Edge/{selected_voice}: "
+                    f"{error}"
                 )
 
                 print(
-                    f"Edge TTS failed: {error}",
+                    f"[TTS] Edge failed: "
+                    f"{error}",
                     flush=True,
                 )
 
-                await asyncio.sleep(2)
+                # Small retry delay
+                await asyncio.sleep(
+                    1.5
+                )
 
-    # Fallback to Google TTS
-    for attempt in range(1, 4):
+    # ==========================================
+    # 2. GOOGLE TTS FALLBACK
+    # ==========================================
+
+    for attempt in range(1, 3):
+
         try:
+
             if output_path.exists():
                 output_path.unlink()
 
             print(
-                f"TTS fallback: gTTS attempt={attempt}",
+                f"[TTS] gTTS fallback "
+                f"attempt={attempt}",
                 flush=True,
             )
 
@@ -113,22 +262,42 @@ async def synthesize(text, output_path, voice=None):
                 output_path,
             )
 
-            print("gTTS successful.", flush=True)
+            print(
+                "[TTS] gTTS successful.",
+                flush=True,
+            )
+
+            print(
+                f"[TTS] Audio size: "
+                f"{result.stat().st_size} bytes",
+                flush=True,
+            )
 
             return result
 
         except Exception as error:
-            errors.append(f"gTTS: {error}")
+
+            errors.append(
+                f"gTTS: {error}"
+            )
 
             print(
-                f"gTTS failed: {error}",
+                f"[TTS] gTTS failed: "
+                f"{error}",
                 flush=True,
             )
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(
+                1.5
+            )
+
+    # ==========================================
+    # ALL TTS FAILED
+    # ==========================================
 
     raise RuntimeError(
-        "Burmese AI voice generation failed. "
-        "All TTS engines failed.\n"
-        + "\n".join(errors[-10:])
+        "Myanmar narrator voice generation failed.\n"
+        + "\n".join(
+            errors[-8:]
+        )
     )
