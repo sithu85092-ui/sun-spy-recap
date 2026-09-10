@@ -7,115 +7,71 @@ import urllib.request
 
 class Narrator:
     """
-    SUN SPY RECAP Burmese AI Narrator
+    SUN SPY RECAP Burmese AI narrator.
 
-    Flow:
-        Any-language transcript
-                ↓
-        Gemini understands content
-                ↓
-        Natural Burmese recap
-                ↓
-        Burmese TTS
+    Pipeline:
+        Original video
+            ↓
+        Whisper transcript
+            ↓
+        Gemini
+            ↓
+        Factual Burmese recap
+            ↓
+        TTS
 
     IMPORTANT:
-    This service NEVER creates a fake generic recap when Gemini fails.
+    Gemini must summarize the actual transcript.
+    It must NOT invent a generic description.
     """
 
+    DEFAULT_MODEL = "gemini-3.5-flash-lite"
+    DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash"
+
+    MAX_TRANSCRIPT_CHARS = 50000
+
+    MIN_RECAP_LENGTH = 80
+    MAX_RECAP_LENGTH = 1600
+
     def __init__(self):
-        self.api_key = os.getenv(
-            "GEMINI_API_KEY",
-            "",
-        ).strip()
-
-        # Current stable Gemini model.
-        # Can be overridden with GEMINI_MODEL.
-        self.model = os.getenv(
-            "GEMINI_MODEL",
-            "gemini-2.5-flash",
-        ).strip()
-
-        # Optional fallback model.
-        self.fallback_model = os.getenv(
-            "GEMINI_FALLBACK_MODEL",
-            "gemini-2.5-flash-lite",
-        ).strip()
-
-        self.timeout = int(
-            os.getenv(
-                "GEMINI_TIMEOUT",
-                "120",
-            )
+        self.api_key = (
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
         )
 
-    # =========================================================
-    # BURMESE DETECTION
-    # =========================================================
-
-    def _has_burmese(self, text):
-        text = str(text or "")
-
-        burmese_chars = sum(
-            1
-            for char in text
-            if "\u1000" <= char <= "\u109f"
+        self.model = (
+            os.getenv("GEMINI_MODEL")
+            or self.DEFAULT_MODEL
         )
 
-        return burmese_chars >= 5
+        self.fallback_model = (
+            os.getenv("GEMINI_FALLBACK_MODEL")
+            or self.DEFAULT_FALLBACK_MODEL
+        )
 
-    # =========================================================
-    # GENERIC FALLBACK DETECTION
-    # =========================================================
+        self.base_url = (
+            "https://generativelanguage.googleapis.com"
+            "/v1beta/models"
+        )
 
-    def _looks_generic(self, text):
-        """
-        Detect old/fake generic narration such as:
-
-        "ဒီဗီဒီယိုလေးမှာတော့ လူသိပ်မသိသေးတဲ့..."
-        """
-
-        text = str(text or "").strip()
-
-        if not text:
-            return True
-
-        generic_patterns = [
-            "ဒီဗီဒီယိုလေးမှာတော့",
-            "ဒီဗီဒီယိုမှာတော့",
-            "လူသိပ်မသိသေးတဲ့ စိတ်ဝင်စားစရာ အကြောင်းအရာ",
-            "စိတ်ဝင်စားစရာ အကြောင်းအရာတစ်ခုကို",
-            "အစကနေ အဆုံးထိ အသေအချာ ကြည့်ရှု",
-            "ဗီဒီယိုလေးကို အဆုံးထိ",
-            "ဒီနေ့မှာတော့ လူသိပ်မသိသေးတဲ့",
-            "အကြောင်းအရာတစ်ခုကို တင်ဆက်",
-        ]
-
-        lower_text = text.lower()
-
-        matches = 0
-
-        for pattern in generic_patterns:
-            if pattern.lower() in lower_text:
-                matches += 1
-
-        # If a known generic phrase exists, reject it.
-        if matches >= 1:
-            return True
-
-        # Very short recap is suspicious.
-        if len(text) < 80:
-            return True
-
-        return False
-
-    # =========================================================
-    # CLEAN GEMINI RESPONSE
-    # =========================================================
+    # ---------------------------------------------------------
+    # Utility
+    # ---------------------------------------------------------
 
     def _clean_text(self, text):
-        text = str(text or "").strip()
+        if not text:
+            return ""
 
-        # Remove markdown
+        text = str(text)
+
+        # Remove markdown.
+        text = re.sub(
+            r"```.*?```",
+            "",
+            text,
+            flags=re.DOTALL,
+        )
+
         text = re.sub(
             r"\*\*(.*?)\*\*",
             r"\1",
@@ -129,43 +85,21 @@ class Narrator:
         )
 
         text = re.sub(
-            r"__(.*?)__",
-            r"\1",
-            text,
-        )
-
-        text = re.sub(
-            r"_(.*?)_",
-            r"\1",
-            text,
-        )
-
-        # Remove code fences
-        text = text.replace(
-            "```text",
+            r"^#+\s*",
             "",
+            text,
+            flags=re.MULTILINE,
         )
 
-        text = text.replace(
-            "```",
-            "",
-        )
-
-        # Remove common AI prefixes
+        # Remove common AI prefixes.
         text = re.sub(
-            r"^(မြန်မာဘာသာဖြင့်|"
-            r"မြန်မာဘာသာနဲ့|"
-            r"အနှစ်ချုပ်|"
-            r"အကျဉ်းချုပ်|"
-            r"Recap|"
-            r"Summary)"
-            r"\s*[:：-]?\s*",
+            r"^(Recap|Summary|Burmese Recap|မြန်မာအကျဉ်းချုပ်)\s*:\s*",
             "",
             text,
             flags=re.IGNORECASE,
         )
 
-        # Normalize whitespace
+        # Remove excessive whitespace.
         text = re.sub(
             r"[ \t]+",
             " ",
@@ -180,107 +114,283 @@ class Narrator:
 
         return text.strip()
 
-    # =========================================================
-    # BUILD GEMINI PROMPT
-    # =========================================================
+    def _looks_burmese(self, text):
+        if not text:
+            return False
+
+        burmese = sum(
+            1
+            for c in text
+            if "\u1000" <= c <= "\u109f"
+        )
+
+        letters = sum(
+            1
+            for c in text
+            if c.isalpha()
+        )
+
+        if letters == 0:
+            return False
+
+        return (
+            burmese >= 10
+            and (burmese / letters) >= 0.25
+        )
+
+    def _contains_generic_filler(self, text):
+        """
+        Detect the type of generic recap that previously
+        appeared in SUN SPY RECAP.
+        """
+
+        if not text:
+            return True
+
+        generic_patterns = [
+            "ဒီဗီဒီယိုလေးမှာတော့",
+            "ဒီဗီဒီယိုမှာတော့",
+            "ဒီဗီဒီယိုထဲမှာတော့",
+            "စိတ်ဝင်စားစရာအကြောင်းအရာ",
+            "စိတ်ဝင်စားဖွယ်အကြောင်းအရာ",
+            "တင်ဆက်ပေးသွားမှာ",
+            "အဆုံးထိကြည့်ရှုလိုက်ကြရအောင်",
+            "အကြောင်းအရာတစ်ခုကို တင်ဆက်",
+            "အဓိကအကြောင်းအရာကတော့",
+            "လူသိပ်မသိသေးတဲ့",
+            "အကြောင်းအရာများကို သဘာဝကျကျ",
+            "လူမှုဘဝနဲ့ ဓလေ့ထုံးတမ်း",
+        ]
+
+        lowered = text.lower()
+
+        matches = 0
+
+        for phrase in generic_patterns:
+            if phrase.lower() in lowered:
+                matches += 1
+
+        return matches >= 2
+
+    def _looks_too_generic(self, text):
+        """
+        Additional protection against a recap that sounds
+        plausible but contains almost no actual information.
+        """
+
+        if not text:
+            return True
+
+        sentences = re.split(
+            r"[။!?]\s*",
+            text,
+        )
+
+        sentences = [
+            s.strip()
+            for s in sentences
+            if s.strip()
+        ]
+
+        if len(sentences) < 2:
+            return True
+
+        generic_words = [
+            "ဗီဒီယို",
+            "အကြောင်းအရာ",
+            "တင်ဆက်",
+            "စိတ်ဝင်စား",
+            "ကြည့်ရှု",
+            "ဖော်ပြ",
+        ]
+
+        generic_count = sum(
+            1
+            for word in generic_words
+            if word in text
+        )
+
+        # If the text is short and mostly generic words,
+        # reject it.
+        if len(text) < 180 and generic_count >= 3:
+            return True
+
+        return False
+
+    def _validate_recap(self, recap, transcript):
+        """
+        Validate Gemini output before sending it to TTS.
+        """
+
+        recap = self._clean_text(recap)
+
+        if not recap:
+            return False, "empty recap"
+
+        if not self._looks_burmese(recap):
+            return False, "not Burmese"
+
+        if len(recap) < self.MIN_RECAP_LENGTH:
+            return False, "recap too short"
+
+        if len(recap) > self.MAX_RECAP_LENGTH:
+            return False, "recap too long"
+
+        if self._contains_generic_filler(recap):
+            return False, "generic filler detected"
+
+        if self._looks_too_generic(recap):
+            return False, "too generic"
+
+        # Reject obvious model meta-talk.
+        forbidden_meta = [
+            "AI အနေနဲ့",
+            "AI အဖြစ်",
+            "ဘာသာပြန်",
+            "ကျွန်ုပ်သည်",
+            "I cannot",
+            "I can't",
+            "As an AI",
+            "language model",
+        ]
+
+        for phrase in forbidden_meta:
+            if phrase.lower() in recap.lower():
+                return False, "AI/meta text detected"
+
+        return True, "valid"
+
+    # ---------------------------------------------------------
+    # Prompt
+    # ---------------------------------------------------------
 
     def _build_prompt(self, transcript):
         return f"""
-You are the main Burmese recap writer for SUN SPY RECAP.
+You are the professional recap writer for SUN SPY RECAP.
 
-The source video can be spoken in ANY language.
+Your task is extremely important:
 
-Your job is to deeply understand the transcript and create a
-short, accurate, natural Burmese narration for a social-media
-video recap.
+Read the ORIGINAL VIDEO TRANSCRIPT below and create a SHORT,
+ACCURATE and NATURAL BURMESE recap.
 
-STRICT RULES:
+The original video may be in ANY language:
+Chinese, English, Japanese, Korean, Thai, Hindi, Burmese,
+or another language.
 
-1. Understand the actual meaning of the transcript.
-2. Identify the MAIN topic of the video.
-3. Identify the most important facts, events, explanation,
-   lesson, story, or message.
-4. Write the final narration ONLY in natural Myanmar Burmese.
-5. Do NOT translate word-for-word.
-6. Do NOT invent facts.
-7. Do NOT add facts that are not supported by the transcript.
-8. Do NOT use a generic introduction.
-9. Do NOT write:
-   "ဒီဗီဒီယိုလေးမှာတော့ လူသိပ်မသိသေးတဲ့..."
-10. Do NOT write:
-   "စိတ်ဝင်စားစရာ အကြောင်းအရာတစ်ခုကို..."
-11. The first sentence must reveal the actual topic or create
-    a topic-specific hook.
-12. Make the narration sound like a real Burmese narrator.
-13. Keep it concise but informative.
-14. Prefer approximately 120-220 Burmese words.
-15. Do not use markdown.
-16. Do not use emojis.
-17. Do not mention AI.
-18. Do not mention Gemini.
-19. Do not mention the source language.
-20. Do not say "watch until the end".
-21. Do not add Like/Follow requests unless the source content
-    itself contains them.
-22. If the source is a story, explain the actual story.
-23. If the source is educational, explain the actual lesson.
-24. If the source is religious/Dhamma content, preserve the
-    meaning faithfully and do not invent doctrine.
-25. If the source contains names, places, numbers, or important
-    terminology, preserve them when relevant.
-26. The result MUST clearly relate to the supplied transcript.
+You must UNDERSTAND the actual meaning of the transcript first.
 
-QUALITY TEST:
+DO NOT translate every sentence word-for-word.
 
-A person reading only your Burmese recap should be able to
-understand what the original video is actually about.
+Instead:
+1. Identify the actual topic.
+2. Identify the important events, facts, teachings, actions,
+   explanations or story points.
+3. Remove repetition and unimportant speech.
+4. Write a coherent Burmese narration.
+5. Make the recap sound like a real human narrator.
+6. Keep only information supported by the transcript.
 
-Return ONLY the final Burmese narration.
+VERY IMPORTANT FACTUAL RULES:
+
+- NEVER invent information.
+- NEVER guess the country, culture, religion, people,
+  location, event or subject unless the transcript supports it.
+- NEVER say something is about China merely because the
+  language is Chinese.
+- NEVER describe the video as "social life", "culture",
+  "daily life" or any other broad topic unless the transcript
+  actually says so.
+- If the transcript is unclear, summarize only what is clear.
+- If a name is unclear, do not invent a name.
+- If a number is unclear, do not invent a number.
+- If the transcript contains dialogue, preserve the meaning
+  of the dialogue rather than inventing new dialogue.
+- Do not use information merely because it sounds plausible.
+
+DO NOT start with generic phrases such as:
+
+"ဒီဗီဒီယိုလေးမှာတော့..."
+"ဒီဗီဒီယိုမှာတော့..."
+"စိတ်ဝင်စားစရာအကြောင်းအရာတစ်ခု..."
+"တင်ဆက်ပေးသွားမှာ..."
+"အဆုံးထိကြည့်ရှုလိုက်ကြရအောင်..."
+
+Start directly with the REAL subject of the video.
+
+STYLE:
+
+- Natural Burmese.
+- Easy to understand.
+- Interesting but factual.
+- Suitable for TikTok / YouTube Shorts narration.
+- No emojis.
+- No hashtags.
+- No markdown.
+- No headings.
+- No bullet points.
+- No English explanation.
+- No mention of AI.
+- No mention of this prompt.
+- No mention of "transcript".
+
+LENGTH:
+
+Write approximately 120–220 Burmese words.
+
+STRUCTURE:
+
+Opening:
+Immediately reveal the actual subject or most interesting point.
+
+Middle:
+Explain the most important information/events.
+
+Ending:
+Finish with the main lesson, conclusion or important point
+ONLY if the transcript supports one.
 
 SOURCE TRANSCRIPT:
---------------------
+
+---------------- BEGIN TRANSCRIPT ----------------
+
 {transcript}
---------------------
-""".strip()
 
-    # =========================================================
-    # GEMINI REQUEST
-    # =========================================================
+----------------- END TRANSCRIPT -----------------
 
-    def _call_gemini(
-        self,
-        prompt,
-        model,
-    ):
+Return ONLY the final Burmese recap.
+"""
+
+    # ---------------------------------------------------------
+    # Gemini API
+    # ---------------------------------------------------------
+
+    def _call_gemini(self, model, prompt):
         if not self.api_key:
             raise RuntimeError(
                 "GEMINI_API_KEY is not configured."
             )
 
-        endpoint = (
-            "https://generativelanguage.googleapis.com"
-            f"/v1beta/models/{model}:generateContent"
-        )
-
         url = (
-            f"{endpoint}"
-            f"?key={self.api_key}"
+            f"{self.base_url}/{model}"
+            f":generateContent?key={self.api_key}"
         )
 
         payload = {
             "contents": [
                 {
+                    "role": "user",
                     "parts": [
                         {
-                            "text": prompt,
+                            "text": prompt
                         }
-                    ]
+                    ],
                 }
             ],
             "generationConfig": {
-                "temperature": 0.45,
-                "topP": 0.9,
-                "maxOutputTokens": 700,
+                "temperature": 0.2,
+                "topP": 0.8,
+                "topK": 20,
+                "maxOutputTokens": 1200,
             },
         }
 
@@ -301,7 +411,7 @@ SOURCE TRANSCRIPT:
         try:
             with urllib.request.urlopen(
                 request,
-                timeout=self.timeout,
+                timeout=120,
             ) as response:
 
                 raw = response.read().decode(
@@ -311,269 +421,168 @@ SOURCE TRANSCRIPT:
                 return json.loads(raw)
 
         except urllib.error.HTTPError as error:
+            body = ""
 
             try:
-                error_body = (
-                    error.read()
-                    .decode(
-                        "utf-8",
-                        errors="replace",
-                    )
+                body = error.read().decode(
+                    "utf-8",
+                    errors="replace",
                 )
             except Exception:
-                error_body = str(error)
-
-            print(
-                f"[GEMINI API ERROR] "
-                f"model={model} "
-                f"HTTP {error.code}: "
-                f"{error_body}",
-                flush=True,
-            )
+                pass
 
             raise RuntimeError(
-                f"Gemini API HTTP {error.code}: "
-                f"{error_body}"
+                f"Gemini HTTP {error.code}: {body[:2000]}"
             )
 
         except urllib.error.URLError as error:
-
-            print(
-                f"[GEMINI NETWORK ERROR] "
-                f"{error}",
-                flush=True,
-            )
-
             raise RuntimeError(
-                f"Gemini network error: {error}"
+                f"Gemini connection error: {error}"
             )
 
         except Exception as error:
-
-            print(
-                f"[GEMINI REQUEST ERROR] "
-                f"{error}",
-                flush=True,
-            )
-
             raise RuntimeError(
                 f"Gemini request failed: {error}"
             )
 
-    # =========================================================
-    # EXTRACT GEMINI TEXT
-    # =========================================================
-
     def _extract_text(self, response):
-
-        if not isinstance(
-            response,
-            dict,
-        ):
-            raise RuntimeError(
-                "Invalid Gemini response."
+        try:
+            candidates = response.get(
+                "candidates",
+                [],
             )
 
-        candidates = response.get(
-            "candidates",
-            [],
-        )
-
-        if not candidates:
-            raise RuntimeError(
-                "Gemini returned no candidates."
-            )
-
-        candidate = candidates[0]
-
-        content = candidate.get(
-            "content",
-            {},
-        )
-
-        parts = content.get(
-            "parts",
-            [],
-        )
-
-        texts = []
-
-        for part in parts:
-
-            if not isinstance(
-                part,
-                dict,
-            ):
-                continue
-
-            text = part.get(
-                "text",
-                "",
-            )
-
-            if text:
-                texts.append(
-                    str(text)
+            if not candidates:
+                raise RuntimeError(
+                    "Gemini returned no candidates."
                 )
 
-        result = "\n".join(
-            texts
-        ).strip()
-
-        if not result:
-            raise RuntimeError(
-                "Gemini returned empty narration."
+            parts = (
+                candidates[0]
+                .get("content", {})
+                .get("parts", [])
             )
 
-        return result
+            texts = []
 
-    # =========================================================
-    # VALIDATE BURMESE
-    # =========================================================
+            for part in parts:
+                text = part.get("text")
 
-    def _validate_burmese(
-        self,
-        text,
-        transcript,
-    ):
+                if text:
+                    texts.append(text)
 
-        text = self._clean_text(
-            text
-        )
+            result = "\n".join(texts).strip()
 
-        if not text:
+            if not result:
+                raise RuntimeError(
+                    "Gemini returned empty text."
+                )
+
+            return result
+
+        except RuntimeError:
+            raise
+
+        except Exception as error:
             raise RuntimeError(
-                "Gemini narration is empty."
+                f"Could not parse Gemini response: {error}"
             )
 
-        if not self._has_burmese(
-            text
-        ):
-            raise RuntimeError(
-                "Gemini did not return Burmese narration."
-            )
+    # ---------------------------------------------------------
+    # Main recap
+    # ---------------------------------------------------------
 
-        # Prevent extremely long output.
-        if len(text) > 3500:
-            text = text[:3500].rstrip()
-
-        # Reject the old generic fallback.
-        if self._looks_generic(
-            text
-        ):
-            raise RuntimeError(
-                "Gemini returned a generic narration "
-                "instead of a transcript-based recap."
-            )
-
-        # Make sure recap isn't suspiciously close
-        # to an empty/trivial result.
-        if len(text) < 80:
-            raise RuntimeError(
-                "Gemini recap is too short."
-            )
-
-        return text
-
-    # =========================================================
-    # CREATE RECAP
-    # =========================================================
-
-    def create_recap(
-        self,
-        transcript,
-    ):
-
+    def create_recap(self, transcript):
         transcript = str(
             transcript or ""
         ).strip()
 
         if not transcript:
-            raise ValueError(
-                "Transcript is empty."
-            )
-
-        if len(transcript) < 20:
-            raise ValueError(
-                "Transcript is too short to create a reliable recap."
+            raise RuntimeError(
+                "Cannot create recap: transcript is empty."
             )
 
         print(
-            "[NARRATOR] Creating Burmese recap "
-            "from transcript...",
+            "[NARRATOR] Creating factual Burmese recap...",
             flush=True,
         )
 
         print(
-            f"[NARRATOR] Primary model: "
-            f"{self.model}",
+            f"[NARRATOR] Transcript length: "
+            f"{len(transcript)} characters",
             flush=True,
         )
 
-        if self.fallback_model:
+        # Prevent extremely large requests.
+        if len(transcript) > self.MAX_TRANSCRIPT_CHARS:
             print(
-                f"[NARRATOR] Fallback model: "
-                f"{self.fallback_model}",
+                "[NARRATOR] Transcript is very long; "
+                "truncating for recap generation.",
                 flush=True,
             )
 
-        # =====================================================
-        # GEMINI REQUIRED FOR AUTOMATIC RECAP
-        # =====================================================
+            transcript_for_ai = transcript[
+                : self.MAX_TRANSCRIPT_CHARS
+            ]
 
-        if not self.api_key:
-
-            raise RuntimeError(
-                "GEMINI_API_KEY is not configured. "
-                "SUN SPY RECAP requires Gemini to create "
-                "an accurate Burmese recap from any language."
-            )
+        else:
+            transcript_for_ai = transcript
 
         prompt = self._build_prompt(
-            transcript
+            transcript_for_ai
         )
 
-        models_to_try = []
+        models = []
 
         if self.model:
-            models_to_try.append(
-                self.model
-            )
+            models.append(self.model)
 
         if (
             self.fallback_model
             and self.fallback_model
-            not in models_to_try
+            != self.model
         ):
-            models_to_try.append(
-                self.fallback_model
-            )
+            models.append(self.fallback_model)
 
-        last_error = None
+        errors = []
 
-        for model in models_to_try:
-
+        for model in models:
             try:
-
                 print(
-                    f"[NARRATOR] Trying Gemini "
-                    f"model: {model}",
+                    f"[NARRATOR] Trying Gemini model: "
+                    f"{model}",
                     flush=True,
                 )
 
                 response = self._call_gemini(
-                    prompt,
                     model,
+                    prompt,
                 )
 
-                generated = self._extract_text(
+                recap = self._extract_text(
                     response
                 )
 
-                recap = self._validate_burmese(
-                    generated,
-                    transcript,
+                valid, reason = (
+                    self._validate_recap(
+                        recap,
+                        transcript_for_ai,
+                    )
                 )
+
+                if not valid:
+                    print(
+                        f"[NARRATOR] Model {model} "
+                        f"produced invalid recap: "
+                        f"{reason}",
+                        flush=True,
+                    )
+
+                    errors.append(
+                        f"{model}: {reason}"
+                    )
+
+                    continue
 
                 print(
                     "[NARRATOR] Burmese recap "
@@ -582,48 +591,44 @@ SOURCE TRANSCRIPT:
                 )
 
                 print(
-                    f"[NARRATOR] Recap: "
-                    f"{recap[:1000]}",
+                    f"[NARRATOR] Recap: {recap}",
                     flush=True,
                 )
 
                 return {
-                    "success": True,
-                    "language": "my",
                     "text": recap,
-                    "source_text": transcript,
                     "engine": "gemini",
                     "model": model,
+                    "language": "my",
                 }
 
             except Exception as error:
-
-                last_error = error
+                message = str(error)
 
                 print(
-                    f"[NARRATOR] Model "
-                    f"{model} failed: "
-                    f"{error}",
+                    f"[NARRATOR] {model} failed: "
+                    f"{message}",
                     flush=True,
                 )
 
-                continue
+                errors.append(
+                    f"{model}: {message}"
+                )
 
-        # =====================================================
+        # -----------------------------------------------------
         # IMPORTANT:
-        # NEVER RETURN A FAKE GENERIC RECAP
-        # =====================================================
+        # Do NOT return fake/generic text.
+        #
+        # If Gemini fails, fail the job instead.
+        # This prevents the old generic recap from being
+        # presented as if it were a real AI recap.
+        # -----------------------------------------------------
 
         raise RuntimeError(
-            "Could not create Burmese recap "
-            "with Gemini API. "
-            f"Models tried: {', '.join(models_to_try)}. "
-            f"Last error: {last_error}"
+            "All Gemini recap models failed. "
+            + " | ".join(errors)
         )
 
 
-# =============================================================
-# GLOBAL NARRATOR INSTANCE
-# =============================================================
-
+# Global narrator instance.
 narrator = Narrator()
