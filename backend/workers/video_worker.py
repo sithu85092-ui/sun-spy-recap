@@ -3,40 +3,50 @@ import asyncio
 from pathlib import Path
 
 from backend.config import TEMP_DIR
+
 from backend.database import (
     SessionLocal,
     utcnow,
 )
+
 from backend.models import Job
+
 
 from backend.services.processor import (
     inspect_video,
     prepare_audio,
 )
 
+
 from backend.services.transcription import (
     transcription_engine,
 )
+
 
 from backend.services.analyzer import (
     choose_highlight,
 )
 
+
 from backend.services.clipper import (
     create_highlight_clip,
 )
+
 
 from backend.services.narrator import (
     narrator,
 )
 
+
 from backend.services.tts import (
     synthesize,
 )
 
+
 from backend.services.subtitles import (
     create_srt,
 )
+
 
 from backend.services.renderer import (
     render_final,
@@ -61,7 +71,9 @@ def update_job(
 
         job = (
             db.query(Job)
-            .filter(Job.id == job_id)
+            .filter(
+                Job.id == job_id
+            )
             .first()
         )
 
@@ -96,6 +108,7 @@ def update_job(
     except Exception:
 
         db.rollback()
+
         raise
 
     finally:
@@ -111,7 +124,9 @@ def get_job(job_id):
 
         job = (
             db.query(Job)
-            .filter(Job.id == job_id)
+            .filter(
+                Job.id == job_id
+            )
             .first()
         )
 
@@ -119,15 +134,25 @@ def get_job(job_id):
             return None
 
         return {
+
             "id": job.id,
+
             "upload_id": job.upload_id,
+
             "status": job.status,
+
             "progress": job.progress,
+
             "message": job.message,
+
             "input_file": job.input_file,
+
             "output_file": job.output_file,
+
             "error": job.error,
+
             "recap_text": job.recap_text,
+
             "language": job.language,
         }
 
@@ -136,11 +161,26 @@ def get_job(job_id):
         db.close()
 
 
-async def process_video(job_id):
+async def process_video(
+    job_id,
+):
 
-    job = get_job(job_id)
+    print(
+        f"[JOB START] {job_id}",
+        flush=True,
+    )
+
+    job = get_job(
+        job_id
+    )
 
     if job is None:
+
+        print(
+            f"[JOB] Not found: {job_id}",
+            flush=True,
+        )
+
         return
 
     input_file = Path(
@@ -149,15 +189,28 @@ async def process_video(job_id):
 
     try:
 
+        if not input_file.exists():
+
+            raise FileNotFoundError(
+                f"Input video not found: "
+                f"{input_file}"
+            )
+
+
         # =================================
         # 1. INSPECT
         # =================================
 
         update_job(
             job_id,
+
             status="PROCESSING",
+
             progress=5,
-            message="Inspecting video...",
+
+            message=(
+                "Inspecting video..."
+            ),
         )
 
         info = await asyncio.to_thread(
@@ -165,7 +218,9 @@ async def process_video(job_id):
             input_file,
         )
 
-        if not info.get("success"):
+        if not info.get(
+            "success"
+        ):
 
             raise RuntimeError(
                 info.get(
@@ -181,15 +236,27 @@ async def process_video(job_id):
             )
         )
 
+        print(
+            f"[JOB] Video duration: "
+            f"{duration:.2f}s",
+            flush=True,
+        )
+
+
         # =================================
         # 2. AUDIO
         # =================================
 
         update_job(
             job_id,
+
             status="TRANSCRIBING",
+
             progress=15,
-            message="Extracting audio...",
+
+            message=(
+                "Extracting audio..."
+            ),
         )
 
         audio_result = (
@@ -199,7 +266,10 @@ async def process_video(job_id):
             )
         )
 
-        if not audio_result.get("success", True):
+        if not audio_result.get(
+            "success",
+            True,
+        ):
 
             raise RuntimeError(
                 audio_result.get(
@@ -209,8 +279,11 @@ async def process_video(job_id):
             )
 
         audio_file = Path(
-            audio_result["audio_file"]
+            audio_result[
+                "audio_file"
+            ]
         )
+
 
         # =================================
         # 3. WHISPER
@@ -218,8 +291,11 @@ async def process_video(job_id):
 
         update_job(
             job_id,
+
             status="TRANSCRIBING",
+
             progress=30,
+
             message=(
                 "Transcribing speech "
                 "with Whisper..."
@@ -252,16 +328,26 @@ async def process_video(job_id):
             .strip()
         )
 
-        segments = transcription.get(
-            "segments",
-            [],
+        segments = (
+            transcription.get(
+                "segments",
+                [],
+            )
         )
 
         if not transcript:
 
             raise RuntimeError(
-                "No speech was detected in the video."
+                "No speech was detected "
+                "in the video."
             )
+
+
+        print(
+            "[JOB] Whisper completed.",
+            flush=True,
+        )
+
 
         # =================================
         # 4. HIGHLIGHT
@@ -269,9 +355,14 @@ async def process_video(job_id):
 
         update_job(
             job_id,
+
             status="ANALYZING",
+
             progress=45,
-            message="Finding the best scene...",
+
+            message=(
+                "Finding the best scene..."
+            ),
         )
 
         clip_duration = min(
@@ -285,8 +376,11 @@ async def process_video(job_id):
         highlight = (
             await asyncio.to_thread(
                 choose_highlight,
+
                 input_file,
+
                 clip_duration,
+
                 segments,
             )
         )
@@ -294,8 +388,17 @@ async def process_video(job_id):
         if not highlight:
 
             raise RuntimeError(
-                "Could not find a suitable highlight."
+                "Could not find a "
+                "suitable highlight."
             )
+
+
+        print(
+            f"[JOB] Highlight: "
+            f"{highlight}",
+            flush=True,
+        )
+
 
         # =================================
         # 5. CLIP
@@ -303,20 +406,45 @@ async def process_video(job_id):
 
         update_job(
             job_id,
+
             status="CLIPPING",
+
             progress=55,
-            message="Creating highlight clip...",
+
+            message=(
+                "Creating highlight clip..."
+            ),
         )
 
         clip_path = (
             await asyncio.to_thread(
                 create_highlight_clip,
+
                 input_file,
+
                 highlight["start"],
+
                 highlight["duration"],
+
                 f"{job_id}_highlight.mp4",
             )
         )
+
+        if not Path(
+            clip_path
+        ).exists():
+
+            raise RuntimeError(
+                "Highlight clip was "
+                "not created."
+            )
+
+
+        print(
+            "[JOB] Highlight clip created.",
+            flush=True,
+        )
+
 
         # =================================
         # 6. BURMESE RECAP
@@ -324,19 +452,24 @@ async def process_video(job_id):
 
         update_job(
             job_id,
+
             status="NARRATING",
+
             progress=65,
-            message="Creating Burmese recap...",
+
+            message=(
+                "Creating Burmese recap..."
+            ),
         )
 
-        recap = (
-            await asyncio.to_thread(
-                narrator.create_recap,
-                transcript,
-            )
+        recap = await asyncio.to_thread(
+            narrator.create_recap,
+            transcript,
         )
 
-        if not recap.get("success"):
+        if not recap.get(
+            "success"
+        ):
 
             raise RuntimeError(
                 recap.get(
@@ -356,8 +489,10 @@ async def process_video(job_id):
         if not recap_text:
 
             raise RuntimeError(
-                "AI recap returned empty text."
+                "AI recap returned "
+                "empty text."
             )
+
 
         # =================================
         # 7. BURMESE TTS
@@ -365,9 +500,14 @@ async def process_video(job_id):
 
         update_job(
             job_id,
+
             status="NARRATING",
+
             progress=72,
-            message="Generating Burmese voice...",
+
+            message=(
+                "Generating Burmese voice..."
+            ),
         )
 
         narration_path = (
@@ -377,8 +517,10 @@ async def process_video(job_id):
 
         await synthesize(
             recap_text,
+
             narration_path,
         )
+
 
         # =================================
         # 8. SUBTITLES
@@ -386,9 +528,14 @@ async def process_video(job_id):
 
         update_job(
             job_id,
+
             status="SUBTITLING",
+
             progress=80,
-            message="Creating subtitles...",
+
+            message=(
+                "Creating subtitles..."
+            ),
         )
 
         subtitle_path = (
@@ -398,8 +545,10 @@ async def process_video(job_id):
 
         create_srt(
             segments,
+
             subtitle_path,
         )
+
 
         # =================================
         # 9. FINAL 9:16
@@ -407,20 +556,39 @@ async def process_video(job_id):
 
         update_job(
             job_id,
+
             status="RENDERING",
+
             progress=88,
-            message="Rendering final 9:16 video...",
+
+            message=(
+                "Rendering final 9:16 video..."
+            ),
         )
 
         final_path = (
             await asyncio.to_thread(
                 render_final,
+
                 clip_path,
+
                 narration_path,
+
                 subtitle_path,
+
                 f"{job_id}_final.mp4",
             )
         )
+
+
+        if not Path(
+            final_path
+        ).exists():
+
+            raise RuntimeError(
+                "Final video was not created."
+            )
+
 
         # =================================
         # 10. COMPLETE
@@ -428,28 +596,64 @@ async def process_video(job_id):
 
         update_job(
             job_id,
+
             status="COMPLETED",
+
             progress=100,
-            message="Final recap created successfully.",
-            output_file=str(final_path),
+
+            message=(
+                "Final recap created successfully."
+            ),
+
+            output_file=str(
+                final_path
+            ),
+
             recap_text=recap_text,
+
             language=transcription.get(
                 "language",
                 "my",
             ),
         )
 
-    except Exception as error:
-
         print(
-            f"[JOB FAILED] {job_id}: {error}",
+            f"[JOB COMPLETE] {job_id}",
             flush=True,
         )
 
-        update_job(
-            job_id,
-            status="FAILED",
-            progress=0,
-            message="Video processing failed.",
-            error=str(error),
+
+    except Exception as error:
+
+        print(
+            f"[JOB FAILED] "
+            f"{job_id}: {error}",
+            flush=True,
         )
+
+        try:
+
+            update_job(
+                job_id,
+
+                status="FAILED",
+
+                progress=0,
+
+                message=(
+                    "Video processing failed."
+                ),
+
+                error=str(
+                    error
+                ),
+            )
+
+        except Exception as update_error:
+
+            print(
+                "[JOB] Failed to update "
+                f"failure status: "
+                f"{update_error}",
+                flush=True,
+            )
