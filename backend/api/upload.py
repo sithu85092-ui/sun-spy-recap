@@ -17,6 +17,10 @@ from backend.config import (
     ALLOWED_VIDEO_EXTENSIONS,
 )
 
+from backend.services.b2_storage import (
+    upload_file,
+)
+
 
 router = APIRouter(
     prefix="/api/upload",
@@ -37,7 +41,6 @@ async def init_upload(
     filename: str = Form(...),
     file_size: int = Form(...),
 ):
-
     if file_size <= 0:
         raise HTTPException(
             400,
@@ -52,7 +55,9 @@ async def init_upload(
 
     filename = Path(filename).name
 
-    extension = Path(filename).suffix.lower()
+    extension = Path(
+        filename
+    ).suffix.lower()
 
     if extension not in ALLOWED_VIDEO_EXTENSIONS:
         raise HTTPException(
@@ -60,9 +65,13 @@ async def init_upload(
             f"Unsupported video format: {extension}",
         )
 
-    upload_id = str(uuid.uuid4())
+    upload_id = str(
+        uuid.uuid4()
+    )
 
-    folder = CHUNK_DIR / upload_id
+    folder = (
+        CHUNK_DIR / upload_id
+    )
 
     folder.mkdir(
         parents=True,
@@ -84,8 +93,9 @@ async def upload_chunk(
     chunk_index: int = Form(...),
     chunk: UploadFile = File(...),
 ):
-
-    folder = CHUNK_DIR / upload_id
+    folder = (
+        CHUNK_DIR / upload_id
+    )
 
     if not folder.exists():
         raise HTTPException(
@@ -104,7 +114,9 @@ async def upload_chunk(
         f"{chunk_index}.part"
     )
 
-    with chunk_path.open("wb") as buffer:
+    with chunk_path.open(
+        "wb"
+    ) as buffer:
 
         shutil.copyfileobj(
             chunk.file,
@@ -124,8 +136,9 @@ async def complete_upload(
     filename: str = Form(...),
     total_chunks: int = Form(...),
 ):
-
-    folder = CHUNK_DIR / upload_id
+    folder = (
+        CHUNK_DIR / upload_id
+    )
 
     if not folder.exists():
         raise HTTPException(
@@ -141,7 +154,9 @@ async def complete_upload(
 
     filename = Path(filename).name
 
-    extension = Path(filename).suffix.lower()
+    extension = Path(
+        filename
+    ).suffix.lower()
 
     if extension not in ALLOWED_VIDEO_EXTENSIONS:
         raise HTTPException(
@@ -149,16 +164,19 @@ async def complete_upload(
             "Unsupported video format",
         )
 
-    final_path = (
+    local_path = (
         UPLOAD_DIR /
         f"{uuid.uuid4()}{extension}"
     )
 
     try:
+        with local_path.open(
+            "wb"
+        ) as output:
 
-        with final_path.open("wb") as output:
-
-            for index in range(total_chunks):
+            for index in range(
+                total_chunks
+            ):
 
                 part = (
                     folder /
@@ -171,7 +189,9 @@ async def complete_upload(
                         f"Missing chunk: {index}",
                     )
 
-                with part.open("rb") as source:
+                with part.open(
+                    "rb"
+                ) as source:
 
                     shutil.copyfileobj(
                         source,
@@ -179,24 +199,25 @@ async def complete_upload(
                     )
 
     except Exception:
-
-        final_path.unlink(
+        local_path.unlink(
             missing_ok=True
         )
 
         raise
 
-    file_size = final_path.stat().st_size
-
-    shutil.rmtree(
-        folder,
-        ignore_errors=True,
+    file_size = (
+        local_path.stat().st_size
     )
 
     if file_size > MAX_FILE_SIZE:
 
-        final_path.unlink(
+        local_path.unlink(
             missing_ok=True
+        )
+
+        shutil.rmtree(
+            folder,
+            ignore_errors=True,
         )
 
         raise HTTPException(
@@ -204,10 +225,59 @@ async def complete_upload(
             "Uploaded file exceeds maximum size",
         )
 
+    # ---------------------------------
+    # UPLOAD TO BACKBLAZE B2
+    # ---------------------------------
+
+    object_key = (
+        f"uploads/{local_path.name}"
+    )
+
+    try:
+        upload_file(
+            local_path,
+            object_key,
+        )
+
+    except Exception as error:
+
+        local_path.unlink(
+            missing_ok=True
+        )
+
+        shutil.rmtree(
+            folder,
+            ignore_errors=True,
+        )
+
+        raise HTTPException(
+            502,
+            f"B2 upload failed: {error}",
+        )
+
+    # ---------------------------------
+    # CLEAN RENDER LOCAL STORAGE
+    # ---------------------------------
+
+    local_path.unlink(
+        missing_ok=True
+    )
+
+    shutil.rmtree(
+        folder,
+        ignore_errors=True,
+    )
+
+    print(
+        f"[UPLOAD COMPLETE] "
+        f"{object_key}",
+        flush=True,
+    )
+
     return {
         "success": True,
         "upload_id": upload_id,
-        "filename": final_path.name,
-        "path": str(final_path),
+        "filename": local_path.name,
+        "path": object_key,
         "file_size": file_size,
     }
