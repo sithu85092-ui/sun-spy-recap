@@ -15,7 +15,6 @@ from backend.services.transcription import (
 )
 
 from backend.services.analyzer import (
-    choose_highlight,
     analyze_video,
 )
 
@@ -153,10 +152,12 @@ async def process_video(job_id):
     job = get_job(job_id)
 
     if job is None:
+
         print(
             f"[JOB] Not found: {job_id}",
             flush=True,
         )
+
         return
 
     input_key = job["input_file"]
@@ -175,6 +176,7 @@ async def process_video(job_id):
     narration_path = None
     subtitle_path = None
     final_path = None
+    audio_file = None
 
     try:
 
@@ -251,6 +253,11 @@ async def process_video(job_id):
             )
         )
 
+        if duration <= 0:
+            raise RuntimeError(
+                "Video duration could not be determined."
+            )
+
         print(
             f"[JOB] Video duration: "
             f"{duration:.2f}s",
@@ -299,6 +306,11 @@ async def process_video(job_id):
                 "Extracted audio file does not exist."
             )
 
+        if audio_file.stat().st_size < 1000:
+            raise RuntimeError(
+                "Extracted audio file is empty."
+            )
+
         # ====================================================
         # 3. WHISPER TRANSCRIPTION
         # ====================================================
@@ -323,7 +335,17 @@ async def process_video(job_id):
             audio_file,
         )
 
-        if not transcription.get("success"):
+        if not isinstance(
+            transcription,
+            dict,
+        ):
+            raise RuntimeError(
+                "Invalid transcription result."
+            )
+
+        if not transcription.get(
+            "success"
+        ):
             raise RuntimeError(
                 transcription.get(
                     "error",
@@ -343,19 +365,28 @@ async def process_video(job_id):
             [],
         )
 
+        if not isinstance(
+            segments,
+            list,
+        ):
+            segments = []
+
         detected_language = str(
             transcription.get(
                 "language",
                 "unknown",
             )
-        )
+        ).strip() or "unknown"
 
-        language_probability = float(
-            transcription.get(
-                "language_probability",
-                0.0,
+        try:
+            language_probability = float(
+                transcription.get(
+                    "language_probability",
+                    0.0,
+                )
             )
-        )
+        except Exception:
+            language_probability = 0.0
 
         if not transcript:
             raise RuntimeError(
@@ -426,9 +457,12 @@ async def process_video(job_id):
             duration,
         )
 
-        if not analysis:
+        if not isinstance(
+            analysis,
+            dict,
+        ):
             raise RuntimeError(
-                "Video analysis returned no result."
+                "Video analysis returned invalid result."
             )
 
         highlight = analysis.get(
@@ -448,36 +482,79 @@ async def process_video(job_id):
             [],
         )
 
-        if not highlight:
+        if not isinstance(
+            scenes,
+            list,
+        ):
+            scenes = []
+
+        if not isinstance(
+            highlight,
+            dict,
+        ) or not highlight:
             raise RuntimeError(
                 "Could not find a suitable highlight."
             )
 
-        highlight_start = float(
-            highlight.get(
-                "start",
-                0.0,
+        try:
+            highlight_start = float(
+                highlight.get(
+                    "start",
+                    0.0,
+                )
             )
-        )
+        except Exception:
+            highlight_start = 0.0
 
-        highlight_duration = float(
-            highlight.get(
-                "duration",
-                min(30.0, duration),
+        try:
+            highlight_duration = float(
+                highlight.get(
+                    "duration",
+                    min(30.0, duration),
+                )
             )
-        )
-
-        # Never exceed source video.
-        if duration > 0:
-            remaining = max(
-                1.0,
-                duration - highlight_start,
-            )
-
+        except Exception:
             highlight_duration = min(
-                highlight_duration,
-                remaining,
+                30.0,
+                duration,
             )
+
+        # ----------------------------------------------------
+        # Safety bounds
+        # ----------------------------------------------------
+
+        highlight_start = max(
+            0.0,
+            highlight_start,
+        )
+
+        if highlight_start >= duration:
+            highlight_start = max(
+                0.0,
+                duration - 5.0,
+            )
+
+        highlight_duration = max(
+            1.0,
+            highlight_duration,
+        )
+
+        remaining = max(
+            1.0,
+            duration - highlight_start,
+        )
+
+        highlight_duration = min(
+            highlight_duration,
+            remaining,
+        )
+
+        highlight_text = str(
+            highlight.get(
+                "text",
+                "",
+            )
+        ).strip()
 
         print(
             f"[ANALYZER] Scene changes: "
@@ -494,6 +571,12 @@ async def process_video(job_id):
         print(
             f"[ANALYZER] Highlight duration: "
             f"{highlight_duration:.2f}s",
+            flush=True,
+        )
+
+        print(
+            f"[ANALYZER] Highlight text: "
+            f"{highlight_text[:500]}",
             flush=True,
         )
 
@@ -543,47 +626,40 @@ async def process_video(job_id):
         )
 
         # ====================================================
-        # 6. BUILD RECAP SOURCE
-        # ====================================================
-        #
-        # The important change:
-        #
-        # Gemini receives:
-        #   - detected language
-        #   - video filename
-        #   - full transcript
-        #   - relevant context
-        #   - selected highlight text
-        #
-        # This gives the AI more evidence and reduces
-        # generic / invented recaps.
+        # 6. BUILD STRUCTURED RECAP INPUT
         # ====================================================
 
         update_job(
             job_id,
             status="NARRATING",
             progress=62,
-            message="Understanding the video and creating Burmese recap...",
+            message=(
+                "Understanding the actual video "
+                "and creating Burmese recap..."
+            ),
         )
-
-        highlight_text = str(
-            highlight.get(
-                "text",
-                "",
-            )
-        ).strip()
 
         recap_input = {
             "filename": input_file.name,
-            "source_language": detected_language,
-            "language_confidence": language_probability,
+
+            "source_language": (
+                detected_language
+            ),
+
+            "language_confidence": (
+                language_probability
+            ),
+
             "full_transcript": transcript,
+
             "relevant_context": context,
+
             "highlight_text": highlight_text,
         }
 
         print(
-            "[NARRATOR] Sending video evidence to Gemini...",
+            "[NARRATOR] Sending structured "
+            "video evidence to Gemini...",
             flush=True,
         )
 
@@ -605,68 +681,56 @@ async def process_video(job_id):
             flush=True,
         )
 
+        print(
+            f"[NARRATOR] Highlight text: "
+            f"{len(highlight_text)} chars",
+            flush=True,
+        )
+
         # ====================================================
         # 7. GEMINI BURMESE RECAP
         # ====================================================
 
-        # New narrator versions may accept a dictionary.
-        # Keep a safe compatibility fallback for older
-        # narrator implementations.
-        try:
+        recap_result = await asyncio.to_thread(
+            narrator.create_recap,
+            recap_input,
+        )
 
-            recap_result = await asyncio.to_thread(
-                narrator.create_recap,
-                recap_input,
-            )
-
-        except TypeError:
-
-            print(
-                "[NARRATOR] Structured input is not "
-                "supported by current narrator; "
-                "using transcript fallback.",
-                flush=True,
-            )
-
-            recap_result = await asyncio.to_thread(
-                narrator.create_recap,
-                transcript,
-            )
-
-        # ----------------------------------------------------
-        # Normalize narrator result
-        # ----------------------------------------------------
-
-        if isinstance(
+        if not isinstance(
             recap_result,
             dict,
         ):
+            raise RuntimeError(
+                "Narrator returned invalid result."
+            )
 
-            recap_text = str(
-                recap_result.get(
-                    "text",
-                    "",
-                )
-            ).strip()
+        recap_text = str(
+            recap_result.get(
+                "text",
+                "",
+            )
+        ).strip()
 
-            recap_engine = recap_result.get(
+        recap_engine = str(
+            recap_result.get(
                 "engine",
                 "unknown",
             )
+        )
 
-            recap_model = recap_result.get(
+        recap_model = str(
+            recap_result.get(
                 "model",
                 "unknown",
             )
+        )
 
-        else:
-
-            recap_text = str(
-                recap_result or ""
-            ).strip()
-
-            recap_engine = "unknown"
-            recap_model = "unknown"
+        recap_language = str(
+            recap_result.get(
+                "language",
+                "my",
+            )
+        )
 
         if not recap_text:
             raise RuntimeError(
@@ -674,27 +738,36 @@ async def process_video(job_id):
             )
 
         # ----------------------------------------------------
-        # Reject known generic fallback.
+        # Additional worker-level safety check.
         # ----------------------------------------------------
 
         forbidden_generic = [
             "ဒီဗီဒီယိုလေးမှာတော့",
-            "ဒီဗီဒီယိုမှာတော့ လူသိပ်မသိသေးတဲ့",
-            "စိတ်ဝင်စားစရာ အကြောင်းအရာတစ်ခုကို",
-            "အစကနေ အဆုံးထိ အသေအချာ",
+            "ဒီဗီဒီယိုမှာတော့",
+            "ဒီဗီဒီယိုထဲမှာတော့",
+            "ဒီဗီဒီယိုကတော့",
+            "အဆုံးထိကြည့်ရှုလိုက်ကြရအောင်",
+            "စိတ်ဝင်စားစရာအကြောင်းအရာ",
+            "စိတ်ဝင်စားဖွယ်အကြောင်းအရာ",
+            "လူမှုဘဝနဲ့ ဓလေ့ထုံးတမ်း",
+            "လူမှုဘဝနှင့် ဓလေ့ထုံးတမ်း",
         ]
+
+        generic_matches = 0
 
         recap_lower = recap_text.lower()
 
         for phrase in forbidden_generic:
 
             if phrase.lower() in recap_lower:
+                generic_matches += 1
 
-                raise RuntimeError(
-                    "AI returned a generic recap. "
-                    "The result was rejected instead "
-                    "of publishing unrelated content."
-                )
+        if generic_matches >= 2:
+            raise RuntimeError(
+                "AI returned a generic recap. "
+                "The result was rejected instead "
+                "of publishing potentially unrelated content."
+            )
 
         print(
             "================================================",
@@ -710,6 +783,12 @@ async def process_video(job_id):
         print(
             f"[NARRATOR] Model: "
             f"{recap_model}",
+            flush=True,
+        )
+
+        print(
+            f"[NARRATOR] Language: "
+            f"{recap_language}",
             flush=True,
         )
 
@@ -765,6 +844,11 @@ async def process_video(job_id):
                 narration_path,
             )
         )
+
+        if narration_duration <= 0:
+            raise RuntimeError(
+                "Narration duration could not be determined."
+            )
 
         print(
             f"[TTS] Myanmar narrator audio: "
@@ -934,6 +1018,7 @@ async def process_video(job_id):
 
         cleanup_files = [
             input_file,
+            audio_file,
             clip_path,
             narration_path,
             subtitle_path,
