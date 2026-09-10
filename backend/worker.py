@@ -2,28 +2,20 @@ import asyncio
 import signal
 import time
 
-from backend.database import (
-    SessionLocal,
-    utcnow,
-)
+from sqlalchemy import or_
 
+from backend.database import SessionLocal, utcnow
 from backend.models import Job
-
-from backend.workers.video_worker import (
-    process_video,
-)
+from backend.workers.video_worker import process_video
 
 
 POLL_INTERVAL = 5
-
+STALE_JOB_SECONDS = 1800
 
 running = True
 
 
-def stop_worker(
-    signum,
-    frame,
-):
+def handle_shutdown(signum, frame):
     global running
 
     print(
@@ -36,37 +28,47 @@ def stop_worker(
 
 signal.signal(
     signal.SIGTERM,
-    stop_worker,
+    handle_shutdown,
 )
 
 signal.signal(
     signal.SIGINT,
-    stop_worker,
+    handle_shutdown,
 )
 
 
-def recover_interrupted_jobs():
+def recover_stale_jobs():
     """
-    Jobs that were PROCESSING when the service
-    restarted are returned to QUEUED state.
+    Return interrupted jobs to QUEUED.
+
+    This allows a job to continue after the
+    worker/server is restarted.
     """
 
     db = SessionLocal()
 
     try:
+        now = utcnow()
+
+        stale_before = (
+            now.timestamp()
+            - STALE_JOB_SECONDS
+        )
+
+        statuses = [
+            "PROCESSING",
+            "TRANSCRIBING",
+            "ANALYZING",
+            "CLIPPING",
+            "NARRATING",
+            "SUBTITLING",
+            "RENDERING",
+        ]
 
         jobs = (
             db.query(Job)
             .filter(
-                Job.status.in_([
-                    "PROCESSING",
-                    "TRANSCRIBING",
-                    "ANALYZING",
-                    "CLIPPING",
-                    "NARRATING",
-                    "SUBTITLING",
-                    "RENDERING",
-                ])
+                Job.status.in_(statuses)
             )
             .all()
         )
@@ -75,32 +77,44 @@ def recover_interrupted_jobs():
 
         for job in jobs:
 
+            updated = job.updated_at
+
+            if updated is None:
+                is_stale = True
+            else:
+                is_stale = (
+                    updated.timestamp()
+                    < stale_before
+                )
+
+            if not is_stale:
+                continue
+
             job.status = "QUEUED"
             job.progress = 0
             job.message = (
-                "Job recovered after worker restart."
+                "Job re-queued after worker restart."
             )
             job.error = None
-            job.updated_at = utcnow()
+            job.updated_at = now
 
             recovered += 1
 
-        db.commit()
-
         if recovered:
+            db.commit()
 
-            print(
-                f"[WORKER] Recovered "
-                f"{recovered} interrupted job(s).",
-                flush=True,
-            )
+        print(
+            f"[WORKER] Recovered "
+            f"{recovered} stale job(s).",
+            flush=True,
+        )
 
     except Exception as error:
 
         db.rollback()
 
         print(
-            "[WORKER] Recovery failed:",
+            "[WORKER] Recovery error:",
             error,
             flush=True,
         )
@@ -110,7 +124,13 @@ def recover_interrupted_jobs():
         db.close()
 
 
-def get_next_job():
+def claim_next_job():
+    """
+    Find one QUEUED job and mark it PROCESSING.
+
+    PostgreSQL row locking prevents two worker
+    loops from claiming the same job.
+    """
 
     db = SessionLocal()
 
@@ -124,23 +144,31 @@ def get_next_job():
             .order_by(
                 Job.created_at.asc()
             )
+            .with_for_update(
+                skip_locked=True
+            )
             .first()
         )
 
         if job is None:
+            db.rollback()
             return None
 
         job.status = "PROCESSING"
-        job.progress = max(
-            int(job.progress or 0),
-            1,
-        )
+        job.progress = 1
         job.message = (
-            "Worker started processing..."
+            "Worker claimed job."
         )
+        job.error = None
         job.updated_at = utcnow()
 
         db.commit()
+
+        print(
+            f"[WORKER] Claimed job: "
+            f"{job.id}",
+            flush=True,
+        )
 
         return job.id
 
@@ -149,7 +177,7 @@ def get_next_job():
         db.rollback()
 
         print(
-            "[WORKER] Failed to get job:",
+            "[WORKER] Claim error:",
             error,
             flush=True,
         )
@@ -168,13 +196,27 @@ async def worker_loop():
         flush=True,
     )
 
-    recover_interrupted_jobs()
+    recover_stale_jobs()
+
+    last_recovery = time.time()
 
     while running:
 
         try:
 
-            job_id = get_next_job()
+            # Periodically recover jobs that became
+            # stale while the worker was running.
+            if (
+                time.time()
+                - last_recovery
+                > 300
+            ):
+
+                recover_stale_jobs()
+
+                last_recovery = time.time()
+
+            job_id = claim_next_job()
 
             if job_id is None:
 
@@ -185,7 +227,7 @@ async def worker_loop():
                 continue
 
             print(
-                f"[WORKER] Processing job: "
+                f"[WORKER] Starting job "
                 f"{job_id}",
                 flush=True,
             )
@@ -199,15 +241,16 @@ async def worker_loop():
             except Exception as error:
 
                 print(
-                    f"[WORKER] Job {job_id} "
-                    f"failed: {error}",
+                    f"[WORKER] Unhandled job "
+                    f"error {job_id}: "
+                    f"{error}",
                     flush=True,
                 )
 
         except Exception as error:
 
             print(
-                "[WORKER] Main loop error:",
+                "[WORKER] Loop error:",
                 error,
                 flush=True,
             )
