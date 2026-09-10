@@ -1,95 +1,152 @@
+import json
 import os
 import re
-import json
-import urllib.request
 import urllib.error
+import urllib.request
 
 
-class BurmeseNarrator:
+class Narrator:
 
     def __init__(self):
-
-        self.engine = "ai-burmese"
-
-        self.api_key = os.getenv(
-            "OPENAI_API_KEY"
-        )
-
+        self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.model = os.getenv(
-            "NARRATOR_MODEL",
-            "gpt-4o-mini"
+            "GEMINI_MODEL",
+            "gemini-2.5-flash-lite",
+        ).strip()
+
+        self.endpoint = (
+            "https://generativelanguage.googleapis.com"
+            f"/v1beta/models/{self.model}:generateContent"
         )
 
-    # ==========================================
-    # OPENAI REQUEST
-    # ==========================================
+    # ---------------------------------------------------------
+    # Burmese detection
+    # ---------------------------------------------------------
 
-    def _call_ai(self, transcript):
+    def _has_burmese(self, text):
+        text = str(text or "")
+
+        burmese_chars = sum(
+            1
+            for char in text
+            if "\u1000" <= char <= "\u109f"
+        )
+
+        return burmese_chars >= 3
+
+    # ---------------------------------------------------------
+    # Clean Gemini response
+    # ---------------------------------------------------------
+
+    def _clean_text(self, text):
+        text = str(text or "").strip()
+
+        # Remove markdown formatting
+        text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+        text = re.sub(r"\*(.*?)\*", r"\1", text)
+        text = re.sub(r"__(.*?)__", r"\1", text)
+        text = re.sub(r"_(.*?)_", r"\1", text)
+
+        # Remove code fences
+        text = text.replace("```text", "")
+        text = text.replace("```", "")
+
+        # Remove common AI prefixes
+        text = re.sub(
+            r"^(မြန်မာဘာသာဖြင့်|အနှစ်ချုပ်|အကျဉ်းချုပ်|"
+            r"Recap|Summary)\s*[:：-]?\s*",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        # Remove excessive whitespace
+        text = re.sub(r"\s+", " ", text).strip()
+
+        return text
+
+    # ---------------------------------------------------------
+    # Build Gemini prompt
+    # ---------------------------------------------------------
+
+    def _build_prompt(self, transcript):
+        return f"""
+You are the Burmese narrator for SUN SPY RECAP.
+
+The source video can be in ANY language.
+
+Your task:
+
+1. Understand the meaning of the source transcript.
+2. Identify the most important, interesting, useful, surprising,
+   emotional, educational, or entertaining information.
+3. Create a SHORT Burmese-language recap suitable for a short video.
+4. The final narration MUST be natural Myanmar Burmese.
+5. Do NOT translate word-for-word.
+6. Do NOT mention that you are an AI.
+7. Do NOT mention the source language.
+8. Do NOT use markdown.
+9. Do NOT use emojis.
+10. Do NOT use English unless absolutely necessary for a proper name.
+11. Write like a natural human Burmese video narrator.
+12. Keep the narration concise and engaging.
+13. Start with an interesting hook.
+14. Explain the key point clearly.
+15. End naturally without saying "ကျေးဇူးတင်ပါတယ်" or
+    "ဗီဒီယိုကို Like and Follow လုပ်ပါ" unless it is genuinely
+    appropriate.
+
+IMPORTANT:
+Return ONLY the final Burmese narration.
+Do not provide analysis.
+Do not provide explanations.
+Do not provide multiple versions.
+
+SOURCE TRANSCRIPT:
+
+{transcript}
+""".strip()
+
+    # ---------------------------------------------------------
+    # Gemini API request
+    # ---------------------------------------------------------
+
+    def _call_gemini(self, prompt):
 
         if not self.api_key:
-            return None
+            raise RuntimeError(
+                "GEMINI_API_KEY is not configured."
+            )
 
-        prompt = f"""
-You are the Burmese narrator and recap writer
-for SUN SPY RECAP.
-
-The input transcript may be in ANY language.
-
-Your job:
-
-1. Understand the meaning of the transcript.
-2. Identify the most important and interesting information.
-3. Create a short, natural Burmese recap.
-4. The FINAL OUTPUT MUST BE IN BURMESE.
-5. NEVER return Chinese, English, Japanese, Korean,
-   or the original transcript language.
-6. Do not translate word-for-word.
-7. Make it sound like a real human Burmese narrator.
-8. Keep the recap engaging and easy to understand.
-9. Do not add information that is not supported
-   by the transcript.
-10. Do not use markdown.
-11. Do not use emojis.
-12. Return ONLY the Burmese narration text.
-
-The narration will be used for Myanmar TTS,
-so write natural spoken Burmese.
-
-Transcript:
-{transcript}
-"""
+        url = (
+            f"{self.endpoint}"
+            f"?key={self.api_key}"
+        )
 
         payload = {
-            "model": self.model,
-            "messages": [
+            "contents": [
                 {
-                    "role": "system",
-                    "content": (
-                        "You are a professional Burmese "
-                        "documentary narrator."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
+                    "parts": [
+                        {
+                            "text": prompt
+                        }
+                    ]
+                }
             ],
-            "temperature": 0.4,
-            "max_tokens": 700,
+            "generationConfig": {
+                "temperature": 0.7,
+                "topP": 0.9,
+                "maxOutputTokens": 500,
+            }
         }
 
-        data = json.dumps(
-            payload
-        ).encode("utf-8")
+        data = json.dumps(payload).encode("utf-8")
 
         request = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
+            url,
             data=data,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": (
-                    f"Bearer {self.api_key}"
-                ),
             },
             method="POST",
         )
@@ -101,304 +158,259 @@ Transcript:
                 timeout=90,
             ) as response:
 
-                result = json.loads(
-                    response.read().decode(
-                        "utf-8"
-                    )
+                raw = response.read().decode(
+                    "utf-8"
                 )
 
-            choices = result.get(
-                "choices",
-                []
-            )
-
-            if not choices:
-                return None
-
-            message = choices[0].get(
-                "message",
-                {}
-            )
-
-            content = message.get(
-                "content",
-                ""
-            )
-
-            if isinstance(
-                content,
-                list,
-            ):
-
-                content = "".join(
-                    item.get("text", "")
-                    for item in content
-                    if isinstance(item, dict)
-                )
-
-            return str(
-                content or ""
-            ).strip()
+                return json.loads(raw)
 
         except urllib.error.HTTPError as error:
 
             try:
-                body = error.read().decode(
+                error_body = error.read().decode(
                     "utf-8",
-                    errors="ignore",
+                    errors="replace",
                 )
             except Exception:
-                body = ""
+                error_body = str(error)
 
             print(
-                f"[NARRATOR AI ERROR] "
-                f"HTTP {error.code}: {body}",
+                f"[GEMINI API ERROR] HTTP {error.code}: "
+                f"{error_body}",
                 flush=True,
             )
 
-            return None
+            raise RuntimeError(
+                f"Gemini API HTTP {error.code}: "
+                f"{error_body}"
+            )
+
+        except urllib.error.URLError as error:
+
+            print(
+                f"[GEMINI NETWORK ERROR] {error}",
+                flush=True,
+            )
+
+            raise RuntimeError(
+                f"Gemini API network error: {error}"
+            )
 
         except Exception as error:
 
             print(
-                f"[NARRATOR AI ERROR] "
-                f"{error}",
+                f"[GEMINI REQUEST ERROR] {error}",
                 flush=True,
             )
 
-            return None
+            raise RuntimeError(
+                f"Gemini API request failed: {error}"
+            )
 
-    # ==========================================
-    # BURMESE CHECK
-    # ==========================================
+    # ---------------------------------------------------------
+    # Extract generated text
+    # ---------------------------------------------------------
 
-    def _has_burmese(self, text):
+    def _extract_text(self, response):
 
-        return any(
-            "\u1000" <= char <= "\u109f"
-            for char in str(text or "")
+        candidates = response.get(
+            "candidates",
+            [],
         )
 
-    # ==========================================
-    # CLEAN AI OUTPUT
-    # ==========================================
+        if not candidates:
+            raise RuntimeError(
+                "Gemini returned no candidates."
+            )
 
-    def _clean_text(self, text):
+        candidate = candidates[0]
 
-        text = str(
-            text or ""
-        ).strip()
-
-        # Remove markdown
-        text = re.sub(
-            r"\*\*|\*|__|_",
-            "",
-            text,
+        content = candidate.get(
+            "content",
+            {},
         )
 
-        text = re.sub(
-            r"^```.*?$",
-            "",
-            text,
-            flags=re.MULTILINE,
+        parts = content.get(
+            "parts",
+            [],
         )
 
-        text = text.replace(
-            "```",
-            "",
-        )
+        texts = []
 
-        # Remove accidental labels
-        text = re.sub(
-            r"^(Burmese|မြန်မာ|Narration|Recap)\s*:\s*",
-            "",
-            text,
-            flags=re.I,
-        )
+        for part in parts:
 
-        # Remove excessive whitespace
-        text = re.sub(
-            r"\s+",
-            " ",
-            text,
-        ).strip()
+            text = part.get(
+                "text",
+                "",
+            )
+
+            if text:
+                texts.append(text)
+
+        result = "\n".join(texts).strip()
+
+        if not result:
+            raise RuntimeError(
+                "Gemini returned empty narration."
+            )
+
+        return result
+
+    # ---------------------------------------------------------
+    # Validate Burmese narration
+    # ---------------------------------------------------------
+
+    def _validate_burmese(self, text):
+
+        text = self._clean_text(text)
+
+        if not text:
+            raise RuntimeError(
+                "Gemini narration is empty."
+            )
+
+        if not self._has_burmese(text):
+
+            raise RuntimeError(
+                "Gemini did not return Burmese narration."
+            )
+
+        # Prevent extremely long output
+        if len(text) > 3000:
+            text = text[:3000].rstrip()
 
         return text
 
-    # ==========================================
-    # LOCAL FALLBACK
-    # ==========================================
+    # ---------------------------------------------------------
+    # Main recap generator
+    # ---------------------------------------------------------
 
-    def _local_fallback(self, transcript):
+    def create_recap(self, transcript):
 
-        """
-        This fallback is NOT a real translation engine.
-
-        It only returns Burmese text when the transcript
-        is already Burmese.
-
-        For Chinese/English/etc. an AI API is required
-        for reliable Burmese translation.
-        """
-
-        text = str(
+        transcript = str(
             transcript or ""
         ).strip()
 
-        if not text:
-            return ""
-
-        if self._has_burmese(text):
-
-            sentences = re.split(
-                r"(?<=[.!?။])\s+",
-                text,
+        if not transcript:
+            raise ValueError(
+                "Transcript is empty."
             )
 
-            sentences = [
-                sentence.strip()
-                for sentence in sentences
-                if sentence.strip()
-            ]
-
-            selected = sentences[:8]
-
-            return " ".join(
-                selected
-            ).strip()
-
-        return ""
-
-    # ==========================================
-    # MAIN RECAP
-    # ==========================================
-
-    def create_recap(
-        self,
-        transcript,
-        max_length=700,
-    ):
-
-        text = str(
-            transcript or ""
-        ).strip()
-
-        if not text:
-
-            return {
-                "success": False,
-                "language": "my",
-                "text": "",
-                "error": "Transcript is empty",
-                "engine": self.engine,
-            }
-
         print(
-            "[NARRATOR] Creating Burmese recap...",
+            "[NARRATOR] Creating Burmese recap "
+            "with Gemini...",
             flush=True,
         )
 
-        # ==========================================
-        # 1. AI BURMESE RECAP
-        # ==========================================
-
-        recap = self._call_ai(
-            text
+        print(
+            f"[NARRATOR] Gemini model: "
+            f"{self.model}",
+            flush=True,
         )
 
-        if recap:
+        # -----------------------------------------------------
+        # Gemini path
+        # -----------------------------------------------------
 
-            recap = self._clean_text(
-                recap
-            )
+        if self.api_key:
 
-            # IMPORTANT:
-            # Never accept non-Burmese AI output.
-            if not self._has_burmese(
-                recap
-            ):
+            try:
+
+                prompt = self._build_prompt(
+                    transcript
+                )
+
+                response = self._call_gemini(
+                    prompt
+                )
+
+                generated = self._extract_text(
+                    response
+                )
+
+                recap = self._validate_burmese(
+                    generated
+                )
 
                 print(
-                    "[NARRATOR] AI returned "
-                    "non-Burmese text. "
-                    "Rejecting output.",
+                    "[NARRATOR] Gemini Burmese recap "
+                    "created successfully.",
                     flush=True,
                 )
 
-                recap = ""
+                print(
+                    f"[NARRATOR] Recap: "
+                    f"{recap[:500]}",
+                    flush=True,
+                )
 
-        # ==========================================
-        # 2. LOCAL BURMESE FALLBACK
-        # ==========================================
+                return {
+                    "success": True,
+                    "language": "my",
+                    "text": recap,
+                    "source_text": transcript,
+                    "engine": "gemini",
+                    "model": self.model,
+                }
 
-        if not recap:
+            except Exception as error:
 
-            recap = self._local_fallback(
-                text
+                print(
+                    f"[NARRATOR] Gemini failed: "
+                    f"{error}",
+                    flush=True,
+                )
+
+                raise RuntimeError(
+                    "Could not create Burmese recap "
+                    "with Gemini API. "
+                    f"{error}"
+                )
+
+        # -----------------------------------------------------
+        # Local fallback
+        #
+        # This only works when the transcript itself
+        # is already Burmese.
+        # -----------------------------------------------------
+
+        print(
+            "[NARRATOR] GEMINI_API_KEY not found. "
+            "Checking local Burmese fallback...",
+            flush=True,
+        )
+
+        if self._has_burmese(transcript):
+
+            recap = self._clean_text(
+                transcript
             )
 
-        # ==========================================
-        # 3. FINAL VALIDATION
-        # ==========================================
-
-        if not recap:
+            print(
+                "[NARRATOR] Using local Burmese "
+                "transcript fallback.",
+                flush=True,
+            )
 
             return {
-                "success": False,
+                "success": True,
                 "language": "my",
-                "text": "",
-                "source_text": text,
-                "error": (
-                    "Could not create Burmese recap. "
-                    "Set OPENAI_API_KEY for automatic "
-                    "translation from other languages."
-                ),
-                "engine": self.engine,
+                "text": recap,
+                "source_text": transcript,
+                "engine": "local-burmese",
+                "model": "none",
             }
 
-        # ==========================================
-        # 4. LENGTH LIMIT
-        # ==========================================
-
-        if len(recap) > max_length:
-
-            shortened = (
-                recap[:max_length]
-                .rsplit(" ", 1)[0]
-                .strip()
-            )
-
-            if shortened:
-
-                recap = (
-                    shortened
-                    + "…"
-                )
-
-            else:
-
-                recap = (
-                    recap[:max_length]
-                    + "…"
-                )
-
-        print(
-            "[NARRATOR] Burmese recap ready.",
-            flush=True,
+        raise RuntimeError(
+            "Could not create Burmese recap. "
+            "Set GEMINI_API_KEY for automatic "
+            "translation and summarization from "
+            "other languages."
         )
 
-        print(
-            f"[NARRATOR] {recap}",
-            flush=True,
-        )
 
-        return {
-            "success": True,
-            "language": "my",
-            "text": recap,
-            "source_text": text,
-            "engine": self.engine,
-        }
+# -------------------------------------------------------------
+# Global narrator instance
+# -------------------------------------------------------------
 
-
-narrator = BurmeseNarrator()
+narrator = Narrator()
