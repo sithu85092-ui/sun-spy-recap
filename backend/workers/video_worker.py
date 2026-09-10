@@ -48,9 +48,9 @@ from backend.services.b2_storage import (
 )
 
 
-# ==========================================
+# =========================================================
 # JOB DATABASE HELPERS
-# ==========================================
+# =========================================================
 
 def update_job(
     job_id,
@@ -138,9 +138,9 @@ def get_job(job_id):
         db.close()
 
 
-# ==========================================
+# =========================================================
 # MAIN VIDEO PROCESSING
-# ==========================================
+# =========================================================
 
 async def process_video(job_id):
 
@@ -177,9 +177,9 @@ async def process_video(job_id):
             exist_ok=True,
         )
 
-        # ==========================================
-        # 0. DOWNLOAD INPUT FROM B2
-        # ==========================================
+        # =====================================================
+        # 0. DOWNLOAD INPUT
+        # =====================================================
 
         update_job(
             job_id,
@@ -214,9 +214,9 @@ async def process_video(job_id):
             flush=True,
         )
 
-        # ==========================================
+        # =====================================================
         # 1. INSPECT VIDEO
-        # ==========================================
+        # =====================================================
 
         update_job(
             job_id,
@@ -239,17 +239,21 @@ async def process_video(job_id):
             )
 
         duration = float(
-            info.get("duration", 0)
+            info.get(
+                "duration",
+                0,
+            )
         )
 
         print(
-            f"[JOB] Video duration: {duration:.2f}s",
+            f"[JOB] Video duration: "
+            f"{duration:.2f}s",
             flush=True,
         )
 
-        # ==========================================
+        # =====================================================
         # 2. EXTRACT AUDIO
-        # ==========================================
+        # =====================================================
 
         update_job(
             job_id,
@@ -278,9 +282,14 @@ async def process_video(job_id):
             audio_result["audio_file"]
         )
 
-        # ==========================================
-        # 3. TRANSCRIBE ANY LANGUAGE
-        # ==========================================
+        if not audio_file.exists():
+            raise RuntimeError(
+                "Extracted audio file does not exist."
+            )
+
+        # =====================================================
+        # 3. TRANSCRIBE
+        # =====================================================
 
         update_job(
             job_id,
@@ -297,7 +306,9 @@ async def process_video(job_id):
             audio_file,
         )
 
-        if not transcription.get("success"):
+        if not transcription.get(
+            "success"
+        ):
             raise RuntimeError(
                 transcription.get(
                     "error",
@@ -330,9 +341,26 @@ async def process_video(job_id):
                 "No speech was detected in the video."
             )
 
+        if len(transcript) < 20:
+            raise RuntimeError(
+                "Transcript is too short to create a reliable recap."
+            )
+
         print(
             f"[WHISPER] Detected language: "
             f"{detected_language}",
+            flush=True,
+        )
+
+        print(
+            f"[WHISPER] Transcript length: "
+            f"{len(transcript)} characters",
+            flush=True,
+        )
+
+        print(
+            f"[WHISPER] Transcript preview: "
+            f"{transcript[:1000]}",
             flush=True,
         )
 
@@ -341,9 +369,9 @@ async def process_video(job_id):
             flush=True,
         )
 
-        # ==========================================
+        # =====================================================
         # 4. FIND BEST / INTERESTING SCENE
-        # ==========================================
+        # =====================================================
 
         update_job(
             job_id,
@@ -394,9 +422,9 @@ async def process_video(job_id):
             flush=True,
         )
 
-        # ==========================================
+        # =====================================================
         # 5. CREATE HIGHLIGHT CLIP
-        # ==========================================
+        # =====================================================
 
         update_job(
             job_id,
@@ -413,7 +441,9 @@ async def process_video(job_id):
             f"{job_id}_highlight.mp4",
         )
 
-        clip_path = Path(clip_path)
+        clip_path = Path(
+            clip_path
+        )
 
         if not clip_path.exists():
             raise RuntimeError(
@@ -431,15 +461,20 @@ async def process_video(job_id):
             flush=True,
         )
 
-        # ==========================================
-        # 6. CREATE BURMESE RECAP
-        # ==========================================
+        # =====================================================
+        # 6. CREATE BURMESE AI RECAP
+        # =====================================================
 
         update_job(
             job_id,
             status="NARRATING",
             progress=65,
-            message="Creating Burmese recap...",
+            message="Understanding video and creating Burmese recap...",
+        )
+
+        print(
+            "[NARRATOR] Sending FULL transcript to Gemini...",
+            flush=True,
         )
 
         recap = await asyncio.to_thread(
@@ -447,7 +482,9 @@ async def process_video(job_id):
             transcript,
         )
 
-        if not recap.get("success"):
+        if not recap.get(
+            "success"
+        ):
             raise RuntimeError(
                 recap.get(
                     "error",
@@ -474,13 +511,33 @@ async def process_video(job_id):
         )
 
         print(
-            f"[NARRATOR] {recap_text}",
+            f"[NARRATOR] Engine: "
+            f"{recap.get('engine')}",
             flush=True,
         )
 
-        # ==========================================
-        # 7. BURMESE NARRATOR VOICE
-        # ==========================================
+        print(
+            f"[NARRATOR] Model: "
+            f"{recap.get('model')}",
+            flush=True,
+        )
+
+        print(
+            f"[NARRATOR] Recap: "
+            f"{recap_text}",
+            flush=True,
+        )
+
+        # Save recap to database immediately.
+        update_job(
+            job_id,
+            recap_text=recap_text,
+            language="my",
+        )
+
+        # =====================================================
+        # 7. BURMESE AI NARRATOR VOICE
+        # =====================================================
 
         update_job(
             job_id,
@@ -509,10 +566,17 @@ async def process_video(job_id):
                 "Narration audio is empty."
             )
 
-        narration_duration = await asyncio.to_thread(
-            get_duration,
-            narration_path,
+        narration_duration = (
+            await asyncio.to_thread(
+                get_duration,
+                narration_path,
+            )
         )
+
+        if narration_duration <= 0:
+            raise RuntimeError(
+                "Narration duration is invalid."
+            )
 
         print(
             f"[TTS] Myanmar narrator audio: "
@@ -520,9 +584,9 @@ async def process_video(job_id):
             flush=True,
         )
 
-        # ==========================================
+        # =====================================================
         # 8. BURMESE SUBTITLE
-        # ==========================================
+        # =====================================================
 
         update_job(
             job_id,
@@ -537,8 +601,8 @@ async def process_video(job_id):
         )
 
         # IMPORTANT:
-        # Subtitle = Burmese recap/narration,
-        # NOT the original-language transcript.
+        # Subtitle is generated from the SAME Burmese
+        # narration used for TTS.
         create_srt(
             recap_text,
             subtitle_path,
@@ -561,9 +625,9 @@ async def process_video(job_id):
             flush=True,
         )
 
-        # ==========================================
+        # =====================================================
         # 9. FINAL 9:16 VIDEO
-        # ==========================================
+        # =====================================================
 
         update_job(
             job_id,
@@ -571,14 +635,6 @@ async def process_video(job_id):
             progress=88,
             message="Rendering final 9:16 video...",
         )
-
-        # renderer.py / ffmpeg.py maps ONLY
-        # narration audio.
-        #
-        # Therefore:
-        # Original video audio = REMOVED
-        # Myanmar narrator = FINAL AUDIO
-        #
 
         final_path = await asyncio.to_thread(
             render_final,
@@ -588,7 +644,9 @@ async def process_video(job_id):
             f"{job_id}_final.mp4",
         )
 
-        final_path = Path(final_path)
+        final_path = Path(
+            final_path
+        )
 
         if not final_path.exists():
             raise RuntimeError(
@@ -606,9 +664,9 @@ async def process_video(job_id):
             flush=True,
         )
 
-        # ==========================================
+        # =====================================================
         # 9.5. UPLOAD FINAL TO B2
-        # ==========================================
+        # =====================================================
 
         update_job(
             job_id,
@@ -639,9 +697,9 @@ async def process_video(job_id):
             flush=True,
         )
 
-        # ==========================================
+        # =====================================================
         # 10. COMPLETE
-        # ==========================================
+        # =====================================================
 
         update_job(
             job_id,
@@ -668,6 +726,7 @@ async def process_video(job_id):
         )
 
         try:
+
             update_job(
                 job_id,
                 status="FAILED",
@@ -686,9 +745,9 @@ async def process_video(job_id):
 
     finally:
 
-        # ==========================================
-        # CLEAN INPUT
-        # ==========================================
+        # =====================================================
+        # CLEAN TEMPORARY INPUT
+        # =====================================================
 
         try:
 
