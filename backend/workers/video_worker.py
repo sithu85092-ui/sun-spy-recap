@@ -16,6 +16,7 @@ from backend.services.transcription import (
 
 from backend.services.analyzer import (
     choose_highlight,
+    analyze_video,
 )
 
 from backend.services.clipper import (
@@ -48,9 +49,9 @@ from backend.services.b2_storage import (
 )
 
 
-# =========================================================
+# ============================================================
 # JOB DATABASE HELPERS
-# =========================================================
+# ============================================================
 
 def update_job(
     job_id,
@@ -138,9 +139,9 @@ def get_job(job_id):
         db.close()
 
 
-# =========================================================
+# ============================================================
 # MAIN VIDEO PROCESSING
-# =========================================================
+# ============================================================
 
 async def process_video(job_id):
 
@@ -170,6 +171,11 @@ async def process_video(job_id):
         f"{job_id}_input.mp4"
     )
 
+    clip_path = None
+    narration_path = None
+    subtitle_path = None
+    final_path = None
+
     try:
 
         TEMP_DIR.mkdir(
@@ -177,9 +183,9 @@ async def process_video(job_id):
             exist_ok=True,
         )
 
-        # =====================================================
-        # 0. DOWNLOAD INPUT
-        # =====================================================
+        # ====================================================
+        # 0. DOWNLOAD VIDEO
+        # ====================================================
 
         update_job(
             job_id,
@@ -214,9 +220,9 @@ async def process_video(job_id):
             flush=True,
         )
 
-        # =====================================================
+        # ====================================================
         # 1. INSPECT VIDEO
-        # =====================================================
+        # ====================================================
 
         update_job(
             job_id,
@@ -251,14 +257,20 @@ async def process_video(job_id):
             flush=True,
         )
 
-        # =====================================================
+        print(
+            f"[JOB] Filename: "
+            f"{input_file.name}",
+            flush=True,
+        )
+
+        # ====================================================
         # 2. EXTRACT AUDIO
-        # =====================================================
+        # ====================================================
 
         update_job(
             job_id,
             status="TRANSCRIBING",
-            progress=15,
+            progress=12,
             message="Extracting audio...",
         )
 
@@ -287,18 +299,23 @@ async def process_video(job_id):
                 "Extracted audio file does not exist."
             )
 
-        # =====================================================
-        # 3. TRANSCRIBE
-        # =====================================================
+        # ====================================================
+        # 3. WHISPER TRANSCRIPTION
+        # ====================================================
 
         update_job(
             job_id,
             status="TRANSCRIBING",
-            progress=30,
+            progress=25,
             message=(
-                "Detecting language and "
-                "transcribing speech..."
+                "Detecting original language "
+                "and transcribing..."
             ),
+        )
+
+        print(
+            "[WHISPER] Starting transcription...",
+            flush=True,
         )
 
         transcription = await asyncio.to_thread(
@@ -306,9 +323,7 @@ async def process_video(job_id):
             audio_file,
         )
 
-        if not transcription.get(
-            "success"
-        ):
+        if not transcription.get("success"):
             raise RuntimeError(
                 transcription.get(
                     "error",
@@ -316,23 +331,29 @@ async def process_video(job_id):
                 )
             )
 
-        transcript = (
+        transcript = str(
             transcription.get(
                 "text",
                 "",
             )
-            .strip()
-        )
+        ).strip()
 
         segments = transcription.get(
             "segments",
             [],
         )
 
-        detected_language = (
+        detected_language = str(
             transcription.get(
                 "language",
                 "unknown",
+            )
+        )
+
+        language_probability = float(
+            transcription.get(
+                "language_probability",
+                0.0,
             )
         )
 
@@ -341,10 +362,10 @@ async def process_video(job_id):
                 "No speech was detected in the video."
             )
 
-        if len(transcript) < 20:
-            raise RuntimeError(
-                "Transcript is too short to create a reliable recap."
-            )
+        print(
+            "================================================",
+            flush=True,
+        )
 
         print(
             f"[WHISPER] Detected language: "
@@ -353,46 +374,78 @@ async def process_video(job_id):
         )
 
         print(
-            f"[WHISPER] Transcript length: "
-            f"{len(transcript)} characters",
+            f"[WHISPER] Language confidence: "
+            f"{language_probability:.3f}",
             flush=True,
         )
 
         print(
-            f"[WHISPER] Transcript preview: "
-            f"{transcript[:1000]}",
+            f"[WHISPER] Segment count: "
+            f"{len(segments)}",
             flush=True,
         )
 
         print(
-            "[JOB] Whisper completed.",
+            "[WHISPER] Transcript preview:",
             flush=True,
         )
 
-        # =====================================================
-        # 4. FIND BEST / INTERESTING SCENE
-        # =====================================================
+        print(
+            transcript[:2000],
+            flush=True,
+        )
+
+        print(
+            "================================================",
+            flush=True,
+        )
+
+        # ====================================================
+        # 4. VIDEO + TRANSCRIPT ANALYSIS
+        # ====================================================
 
         update_job(
             job_id,
             status="ANALYZING",
-            progress=45,
-            message="Finding the most interesting scene...",
-        )
-
-        clip_duration = min(
-            30.0,
-            max(
-                5.0,
-                duration,
+            progress=42,
+            message=(
+                "Analyzing scenes and important "
+                "video content..."
             ),
         )
 
-        highlight = await asyncio.to_thread(
-            choose_highlight,
+        print(
+            "[ANALYZER] Starting video analysis...",
+            flush=True,
+        )
+
+        analysis = await asyncio.to_thread(
+            analyze_video,
             input_file,
-            clip_duration,
             segments,
+            duration,
+        )
+
+        if not analysis:
+            raise RuntimeError(
+                "Video analysis returned no result."
+            )
+
+        highlight = analysis.get(
+            "highlight",
+            {},
+        )
+
+        context = str(
+            analysis.get(
+                "context",
+                "",
+            )
+        ).strip()
+
+        scenes = analysis.get(
+            "scenes",
+            [],
         )
 
         if not highlight:
@@ -403,33 +456,61 @@ async def process_video(job_id):
         highlight_start = float(
             highlight.get(
                 "start",
-                0,
+                0.0,
             )
         )
 
         highlight_duration = float(
             highlight.get(
                 "duration",
-                clip_duration,
+                min(30.0, duration),
             )
         )
 
+        # Never exceed source video.
+        if duration > 0:
+            remaining = max(
+                1.0,
+                duration - highlight_start,
+            )
+
+            highlight_duration = min(
+                highlight_duration,
+                remaining,
+            )
+
         print(
-            f"[JOB] Highlight selected: "
-            f"start={highlight_start:.2f}s "
-            f"duration={highlight_duration:.2f}s "
-            f"score={highlight.get('score')}",
+            f"[ANALYZER] Scene changes: "
+            f"{len(scenes)}",
             flush=True,
         )
 
-        # =====================================================
+        print(
+            f"[ANALYZER] Highlight start: "
+            f"{highlight_start:.2f}s",
+            flush=True,
+        )
+
+        print(
+            f"[ANALYZER] Highlight duration: "
+            f"{highlight_duration:.2f}s",
+            flush=True,
+        )
+
+        print(
+            f"[ANALYZER] Context length: "
+            f"{len(context)} chars",
+            flush=True,
+        )
+
+        # ====================================================
         # 5. CREATE HIGHLIGHT CLIP
-        # =====================================================
+        # ====================================================
 
         update_job(
             job_id,
             status="CLIPPING",
-            progress=55,
+            progress=52,
             message="Creating the best scene clip...",
         )
 
@@ -456,88 +537,200 @@ async def process_video(job_id):
             )
 
         print(
-            f"[JOB] Highlight clip created: "
+            f"[CLIPPER] Highlight created: "
             f"{clip_path}",
             flush=True,
         )
 
-        # =====================================================
-        # 6. CREATE BURMESE AI RECAP
-        # =====================================================
+        # ====================================================
+        # 6. BUILD RECAP SOURCE
+        # ====================================================
+        #
+        # The important change:
+        #
+        # Gemini receives:
+        #   - detected language
+        #   - video filename
+        #   - full transcript
+        #   - relevant context
+        #   - selected highlight text
+        #
+        # This gives the AI more evidence and reduces
+        # generic / invented recaps.
+        # ====================================================
 
         update_job(
             job_id,
             status="NARRATING",
-            progress=65,
-            message="Understanding video and creating Burmese recap...",
+            progress=62,
+            message="Understanding the video and creating Burmese recap...",
         )
 
-        print(
-            "[NARRATOR] Sending FULL transcript to Gemini...",
-            flush=True,
-        )
-
-        recap = await asyncio.to_thread(
-            narrator.create_recap,
-            transcript,
-        )
-
-        if not recap.get(
-            "success"
-        ):
-            raise RuntimeError(
-                recap.get(
-                    "error",
-                    "Recap creation failed.",
-                )
-            )
-
-        recap_text = (
-            recap.get(
+        highlight_text = str(
+            highlight.get(
                 "text",
                 "",
             )
-            .strip()
+        ).strip()
+
+        recap_input = {
+            "filename": input_file.name,
+            "source_language": detected_language,
+            "language_confidence": language_probability,
+            "full_transcript": transcript,
+            "relevant_context": context,
+            "highlight_text": highlight_text,
+        }
+
+        print(
+            "[NARRATOR] Sending video evidence to Gemini...",
+            flush=True,
         )
+
+        print(
+            f"[NARRATOR] Source language: "
+            f"{detected_language}",
+            flush=True,
+        )
+
+        print(
+            f"[NARRATOR] Full transcript: "
+            f"{len(transcript)} chars",
+            flush=True,
+        )
+
+        print(
+            f"[NARRATOR] Relevant context: "
+            f"{len(context)} chars",
+            flush=True,
+        )
+
+        # ====================================================
+        # 7. GEMINI BURMESE RECAP
+        # ====================================================
+
+        # New narrator versions may accept a dictionary.
+        # Keep a safe compatibility fallback for older
+        # narrator implementations.
+        try:
+
+            recap_result = await asyncio.to_thread(
+                narrator.create_recap,
+                recap_input,
+            )
+
+        except TypeError:
+
+            print(
+                "[NARRATOR] Structured input is not "
+                "supported by current narrator; "
+                "using transcript fallback.",
+                flush=True,
+            )
+
+            recap_result = await asyncio.to_thread(
+                narrator.create_recap,
+                transcript,
+            )
+
+        # ----------------------------------------------------
+        # Normalize narrator result
+        # ----------------------------------------------------
+
+        if isinstance(
+            recap_result,
+            dict,
+        ):
+
+            recap_text = str(
+                recap_result.get(
+                    "text",
+                    "",
+                )
+            ).strip()
+
+            recap_engine = recap_result.get(
+                "engine",
+                "unknown",
+            )
+
+            recap_model = recap_result.get(
+                "model",
+                "unknown",
+            )
+
+        else:
+
+            recap_text = str(
+                recap_result or ""
+            ).strip()
+
+            recap_engine = "unknown"
+            recap_model = "unknown"
 
         if not recap_text:
             raise RuntimeError(
                 "AI recap returned empty text."
             )
 
+        # ----------------------------------------------------
+        # Reject known generic fallback.
+        # ----------------------------------------------------
+
+        forbidden_generic = [
+            "ဒီဗီဒီယိုလေးမှာတော့",
+            "ဒီဗီဒီယိုမှာတော့ လူသိပ်မသိသေးတဲ့",
+            "စိတ်ဝင်စားစရာ အကြောင်းအရာတစ်ခုကို",
+            "အစကနေ အဆုံးထိ အသေအချာ",
+        ]
+
+        recap_lower = recap_text.lower()
+
+        for phrase in forbidden_generic:
+
+            if phrase.lower() in recap_lower:
+
+                raise RuntimeError(
+                    "AI returned a generic recap. "
+                    "The result was rejected instead "
+                    "of publishing unrelated content."
+                )
+
         print(
-            "[NARRATOR] Burmese recap created.",
+            "================================================",
             flush=True,
         )
 
         print(
             f"[NARRATOR] Engine: "
-            f"{recap.get('engine')}",
+            f"{recap_engine}",
             flush=True,
         )
 
         print(
             f"[NARRATOR] Model: "
-            f"{recap.get('model')}",
+            f"{recap_model}",
             flush=True,
         )
 
         print(
-            f"[NARRATOR] Recap: "
-            f"{recap_text}",
+            "[NARRATOR] FINAL BURMESE RECAP:",
             flush=True,
         )
 
-        # Save recap to database immediately.
-        update_job(
-            job_id,
-            recap_text=recap_text,
-            language="my",
+        print(
+            recap_text,
+            flush=True,
         )
 
-        # =====================================================
-        # 7. BURMESE AI NARRATOR VOICE
-        # =====================================================
+        print(
+            "================================================",
+            flush=True,
+        )
+
+        # ====================================================
+        # 8. BURMESE TTS
+        # ====================================================
 
         update_job(
             job_id,
@@ -573,20 +766,15 @@ async def process_video(job_id):
             )
         )
 
-        if narration_duration <= 0:
-            raise RuntimeError(
-                "Narration duration is invalid."
-            )
-
         print(
             f"[TTS] Myanmar narrator audio: "
             f"{narration_duration:.2f}s",
             flush=True,
         )
 
-        # =====================================================
-        # 8. BURMESE SUBTITLE
-        # =====================================================
+        # ====================================================
+        # 9. BURMESE SUBTITLE
+        # ====================================================
 
         update_job(
             job_id,
@@ -600,9 +788,6 @@ async def process_video(job_id):
             f"{job_id}.srt"
         )
 
-        # IMPORTANT:
-        # Subtitle is generated from the SAME Burmese
-        # narration used for TTS.
         create_srt(
             recap_text,
             subtitle_path,
@@ -620,14 +805,14 @@ async def process_video(job_id):
             )
 
         print(
-            f"[SRT] Burmese narrator subtitles ready: "
+            f"[SRT] Burmese subtitles ready: "
             f"{subtitle_path}",
             flush=True,
         )
 
-        # =====================================================
-        # 9. FINAL 9:16 VIDEO
-        # =====================================================
+        # ====================================================
+        # 10. RENDER FINAL 9:16
+        # ====================================================
 
         update_job(
             job_id,
@@ -659,14 +844,14 @@ async def process_video(job_id):
             )
 
         print(
-            f"[JOB] Final video rendered: "
+            f"[RENDER] Final video: "
             f"{final_path}",
             flush=True,
         )
 
-        # =====================================================
-        # 9.5. UPLOAD FINAL TO B2
-        # =====================================================
+        # ====================================================
+        # 11. UPLOAD FINAL VIDEO
+        # ====================================================
 
         update_job(
             job_id,
@@ -680,8 +865,7 @@ async def process_video(job_id):
         )
 
         print(
-            f"[B2] Uploading final: "
-            f"{final_key}",
+            f"[B2] Uploading: {final_key}",
             flush=True,
         )
 
@@ -692,14 +876,13 @@ async def process_video(job_id):
         )
 
         print(
-            f"[B2] Final upload complete: "
-            f"{final_key}",
+            "[B2] Upload complete.",
             flush=True,
         )
 
-        # =====================================================
-        # 10. COMPLETE
-        # =====================================================
+        # ====================================================
+        # 12. COMPLETE
+        # ====================================================
 
         update_job(
             job_id,
@@ -745,25 +928,40 @@ async def process_video(job_id):
 
     finally:
 
-        # =====================================================
-        # CLEAN TEMPORARY INPUT
-        # =====================================================
+        # ====================================================
+        # CLEANUP
+        # ====================================================
 
-        try:
+        cleanup_files = [
+            input_file,
+            clip_path,
+            narration_path,
+            subtitle_path,
+            final_path,
+        ]
 
-            if input_file.exists():
+        for path in cleanup_files:
 
-                input_file.unlink()
+            try:
+
+                if path is not None:
+
+                    path = Path(path)
+
+                    if path.exists():
+
+                        path.unlink()
+
+                        print(
+                            f"[CLEANUP] Removed: "
+                            f"{path.name}",
+                            flush=True,
+                        )
+
+            except Exception as cleanup_error:
 
                 print(
-                    "[CLEANUP] Temporary input removed.",
+                    "[CLEANUP] Failed: "
+                    f"{cleanup_error}",
                     flush=True,
                 )
-
-        except Exception as cleanup_error:
-
-            print(
-                "[CLEANUP] Input cleanup failed: "
-                f"{cleanup_error}",
-                flush=True,
-            )
