@@ -8,3 +8,4 @@ ffmpeg-python
 pydantic
 SQLAlchemy
 psycopg2-binary
+boto3>=1.35.0
