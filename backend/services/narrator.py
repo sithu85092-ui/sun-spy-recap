@@ -1,5 +1,7 @@
 import os
 import re
+import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import requests
@@ -8,59 +10,44 @@ import requests
 class Narrator:
     """
     SUN SPY RECAP
-    Gemini-powered Burmese recap generator.
+    Multimodal Gemini narrator.
 
-    Input can be:
-      1. plain transcript string
-      2. structured dictionary containing:
-         - filename
-         - source_language
-         - language_confidence
-         - full_transcript
-         - relevant_context
-         - highlight_text
+    Evidence:
+      1. Actual video
+      2. Whisper transcript
+      3. Selected transcript context
 
     Output:
-      {
-          "text": "...",
-          "engine": "gemini",
-          "model": "...",
-          "language": "my",
-      }
+      Natural Burmese recap only.
     """
 
     DEFAULT_MODEL = "gemini-3.5-flash-lite"
     DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash"
 
-    MAX_TRANSCRIPT_CHARS = 50000
-    MAX_CONTEXT_CHARS = 18000
-    MAX_HIGHLIGHT_CHARS = 8000
+    BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+    UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
 
-    MIN_RECAP_LENGTH = 80
-    MAX_RECAP_LENGTH = 1600
+    REQUEST_TIMEOUT = 180
+    PROCESS_TIMEOUT = 300
+    POLL_SECONDS = 5
 
-    REQUEST_TIMEOUT = 120
+    MAX_TRANSCRIPT_CHARS = 30000
+    MAX_CONTEXT_CHARS = 12000
+    MAX_HIGHLIGHT_CHARS = 6000
+
+    MIN_RECAP_LENGTH = 40
+    MAX_RECAP_LENGTH = 1800
 
     GENERIC_PHRASES = [
+        "SUN SPY RECAP မှ တင်ဆက်ပေးလိုက်ပါတယ်",
         "ဒီဗီဒီယိုလေးမှာတော့",
         "ဒီဗီဒီယိုမှာတော့",
         "ဒီဗီဒီယိုထဲမှာတော့",
         "ဒီဗီဒီယိုကတော့",
-        "ဒီဗီဒီယိုမှာ",
         "စိတ်ဝင်စားစရာအကြောင်းအရာ",
         "စိတ်ဝင်စားဖွယ်အကြောင်းအရာ",
-        "တင်ဆက်ပေးသွားမှာ",
         "အဆုံးထိကြည့်ရှုလိုက်ကြရအောင်",
-        "အကြောင်းအရာတစ်ခုကို တင်ဆက်",
-        "အဓိကအကြောင်းအရာကတော့",
-        "လူသိပ်မသိသေးတဲ့",
-        "အကြောင်းအရာများကို သဘာဝကျကျ",
-        "လူမှုဘဝနဲ့ ဓလေ့ထုံးတမ်း",
-        "လူမှုဘဝနှင့် ဓလေ့ထုံးတမ်း",
-        "ဗဟုသုတရစရာ",
-        "စိတ်ဝင်စားဖို့ကောင်းတဲ့",
-        "စိတ်ဝင်စားဖွယ်ကောင်းတဲ့",
-        "ဒီအကြောင်းအရာလေးက",
+        "တင်ဆက်ပေးသွားမှာ",
     ]
 
     def __init__(self):
@@ -79,45 +66,43 @@ class Narrator:
             or self.DEFAULT_FALLBACK_MODEL
         )
 
-        self.base_url = (
-            "https://generativelanguage.googleapis.com"
-            "/v1beta/models"
-        )
-
         if not self.api_key:
             print(
-                "[NARRATOR] WARNING: "
-                "GEMINI_API_KEY / GOOGLE_API_KEY "
-                "is not configured.",
+                "[NARRATOR] ERROR: GEMINI_API_KEY is missing.",
                 flush=True,
             )
 
-    # ========================================================
-    # TEXT HELPERS
-    # ========================================================
+        print(
+            f"[NARRATOR] Engine: gemini-multimodal",
+            flush=True,
+        )
+        print(
+            f"[NARRATOR] Model: {self.model}",
+            flush=True,
+        )
+        print(
+            f"[NARRATOR] Fallback: {self.fallback_model}",
+            flush=True,
+        )
+
+    # ---------------------------------------------------------
+    # BASIC HELPERS
+    # ---------------------------------------------------------
 
     @staticmethod
-    def _clean_text(text: Any) -> str:
-        if text is None:
+    def _clean_text(value: Any) -> str:
+        if value is None:
             return ""
 
-        text = str(text)
+        text = str(value)
 
         text = text.replace("\x00", " ")
-
-        text = re.sub(
-            r"\s+",
-            " ",
-            text,
-        )
+        text = re.sub(r"\s+", " ", text)
 
         return text.strip()
 
     @staticmethod
     def _looks_burmese(text: str) -> bool:
-        if not text:
-            return False
-
         burmese_chars = re.findall(
             r"[\u1000-\u109F]",
             text,
@@ -125,132 +110,92 @@ class Narrator:
 
         return len(burmese_chars) >= 10
 
-    def _contains_generic_filler(
-        self,
-        text: str,
-    ) -> bool:
-
-        if not text:
-            return True
-
+    def _contains_generic(self, text: str) -> bool:
         lowered = text.lower()
 
-        matches = 0
+        hits = 0
 
         for phrase in self.GENERIC_PHRASES:
             if phrase.lower() in lowered:
-                matches += 1
+                hits += 1
 
-        return matches >= 2
+        return hits >= 1
 
-    def _looks_too_generic(
-        self,
-        text: str,
-    ) -> bool:
+    def _validate_recap(self, text: str) -> str:
+        text = self._clean_text(text)
+
+        text = re.sub(
+            r"```(?:text|burmese|my)?",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        text = text.replace("```", "").strip()
 
         if not text:
-            return True
-
-        if len(text) < self.MIN_RECAP_LENGTH:
-            return True
-
-        if self._contains_generic_filler(text):
-            return True
-
-        return False
-
-    def _validate_recap(
-        self,
-        recap: str,
-    ) -> str:
-
-        recap = self._clean_text(recap)
-
-        if not recap:
             raise RuntimeError(
                 "Gemini returned empty recap."
             )
 
-        # Remove accidental markdown.
-        recap = re.sub(
-            r"^```[\w-]*",
-            "",
-            recap,
-            flags=re.IGNORECASE,
-        )
-
-        recap = recap.replace(
-            "```",
-            "",
-        )
-
-        recap = recap.strip()
-
-        if not recap:
+        if not self._looks_burmese(text):
             raise RuntimeError(
-                "Gemini returned empty recap "
-                "after cleanup."
+                "Gemini did not return Burmese."
             )
 
-        if not self._looks_burmese(recap):
-            raise RuntimeError(
-                "Gemini did not return a Burmese recap."
-            )
-
-        if len(recap) < self.MIN_RECAP_LENGTH:
+        if len(text) < self.MIN_RECAP_LENGTH:
             raise RuntimeError(
                 "Gemini recap is too short."
             )
 
-        if len(recap) > self.MAX_RECAP_LENGTH:
-            recap = recap[
-                :self.MAX_RECAP_LENGTH
-            ].rstrip()
-
-        if self._looks_too_generic(recap):
+        if self._contains_generic(text):
             raise RuntimeError(
-                "Gemini returned a generic or "
-                "unrelated recap."
+                "Gemini returned generic introduction."
             )
 
-        return recap
+        if len(text) > self.MAX_RECAP_LENGTH:
+            text = text[:self.MAX_RECAP_LENGTH].rstrip()
 
-    # ========================================================
-    # INPUT NORMALIZATION
-    # ========================================================
+        return text
 
-    def _normalize_input(
-        self,
-        data: Any,
-    ) -> Dict[str, str]:
-
-        # ----------------------------------------------------
-        # Backward compatibility:
-        # narrator.create_recap("transcript")
-        # ----------------------------------------------------
+    def _normalize_input(self, data: Any) -> Dict[str, str]:
 
         if isinstance(data, str):
-
-            transcript = self._clean_text(
-                data
-            )
-
             return {
                 "filename": "",
                 "source_language": "unknown",
                 "language_confidence": "",
-                "full_transcript": transcript,
+                "full_transcript": self._clean_text(data),
                 "relevant_context": "",
                 "highlight_text": "",
+                "video_path": "",
             }
 
-        # ----------------------------------------------------
-        # Structured input
-        # ----------------------------------------------------
+        if not isinstance(data, dict):
+            raise TypeError(
+                "create_recap expects dict or string."
+            )
 
-        if isinstance(data, dict):
+        return {
+            "filename": self._clean_text(
+                data.get("filename", "")
+            ),
 
-            transcript = self._clean_text(
+            "source_language": self._clean_text(
+                data.get(
+                    "source_language",
+                    "unknown",
+                )
+            ),
+
+            "language_confidence": self._clean_text(
+                data.get(
+                    "language_confidence",
+                    "",
+                )
+            ),
+
+            "full_transcript": self._clean_text(
                 data.get(
                     "full_transcript",
                     data.get(
@@ -258,9 +203,9 @@ class Narrator:
                         "",
                     ),
                 )
-            )
+            ),
 
-            context = self._clean_text(
+            "relevant_context": self._clean_text(
                 data.get(
                     "relevant_context",
                     data.get(
@@ -268,9 +213,9 @@ class Narrator:
                         "",
                     ),
                 )
-            )
+            ),
 
-            highlight = self._clean_text(
+            "highlight_text": self._clean_text(
                 data.get(
                     "highlight_text",
                     data.get(
@@ -278,353 +223,511 @@ class Narrator:
                         "",
                     ),
                 )
+            ),
+
+            "video_path": self._clean_text(
+                data.get(
+                    "video_path",
+                    "",
+                )
+            ),
+        }
+
+    # ---------------------------------------------------------
+    # GEMINI FILE API
+    # ---------------------------------------------------------
+
+    def _upload_video(
+        self,
+        video_path: str,
+    ) -> Dict[str, Any]:
+
+        if not self.api_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY is not configured."
             )
 
-            return {
-                "filename": self._clean_text(
-                    data.get(
-                        "filename",
-                        "",
-                    )
-                ),
-                "source_language": self._clean_text(
-                    data.get(
-                        "source_language",
-                        "unknown",
-                    )
-                ),
-                "language_confidence": self._clean_text(
-                    data.get(
-                        "language_confidence",
-                        "",
-                    )
-                ),
-                "full_transcript": transcript,
-                "relevant_context": context,
-                "highlight_text": highlight,
-            }
+        path = Path(video_path)
 
-        raise TypeError(
-            "create_recap() expects either "
-            "a transcript string or a dictionary."
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Video not found: {path}"
+            )
+
+        file_size = path.stat().st_size
+
+        mime_type = "video/mp4"
+
+        print(
+            "================================================",
+            flush=True,
         )
 
-    # ========================================================
+        print(
+            "[GEMINI VIDEO] Uploading actual video...",
+            flush=True,
+        )
+
+        print(
+            f"[GEMINI VIDEO] File: {path.name}",
+            flush=True,
+        )
+
+        print(
+            f"[GEMINI VIDEO] Size: "
+            f"{file_size / 1024 / 1024:.2f} MB",
+            flush=True,
+        )
+
+        # -----------------------------------------------------
+        # STEP 1
+        # Start resumable upload
+        # -----------------------------------------------------
+
+        headers = {
+            "x-goog-api-key": self.api_key,
+            "X-Goog-Upload-Protocol": "resumable",
+            "X-Goog-Upload-Command": "start",
+            "X-Goog-Upload-Header-Content-Length": str(
+                file_size
+            ),
+            "X-Goog-Upload-Header-Content-Type": mime_type,
+            "Content-Type": "application/json",
+        }
+
+        metadata = {
+            "file": {
+                "display_name": path.name,
+            }
+        }
+
+        response = requests.post(
+            self.UPLOAD_URL,
+            headers=headers,
+            json=metadata,
+            timeout=60,
+        )
+
+        if response.status_code not in (200, 201):
+            raise RuntimeError(
+                "Gemini upload initialization failed: "
+                f"HTTP {response.status_code}: "
+                f"{response.text[:3000]}"
+            )
+
+        upload_url = (
+            response.headers.get(
+                "x-goog-upload-url"
+            )
+            or response.headers.get(
+                "X-Goog-Upload-URL"
+            )
+        )
+
+        if not upload_url:
+            raise RuntimeError(
+                "Gemini did not return upload URL."
+            )
+
+        print(
+            "[GEMINI VIDEO] Resumable upload session created.",
+            flush=True,
+        )
+
+        # -----------------------------------------------------
+        # STEP 2
+        # Upload and finalize
+        # -----------------------------------------------------
+
+        with open(path, "rb") as file_handle:
+
+            upload_headers = {
+                "Content-Length": str(file_size),
+                "X-Goog-Upload-Offset": "0",
+                "X-Goog-Upload-Command": (
+                    "upload, finalize"
+                ),
+            }
+
+            upload_response = requests.post(
+                upload_url,
+                headers=upload_headers,
+                data=file_handle,
+                timeout=self.REQUEST_TIMEOUT,
+            )
+
+        if upload_response.status_code not in (200, 201):
+            raise RuntimeError(
+                "Gemini video upload failed: "
+                f"HTTP {upload_response.status_code}: "
+                f"{upload_response.text[:3000]}"
+            )
+
+        try:
+            result = upload_response.json()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Invalid Gemini upload response: {exc}"
+            )
+
+        file_info = result.get(
+            "file",
+            result,
+        )
+
+        file_name = file_info.get("name")
+        file_uri = file_info.get("uri")
+
+        file_mime = (
+            file_info.get("mimeType")
+            or mime_type
+        )
+
+        state = file_info.get("state")
+
+        if not file_uri:
+            raise RuntimeError(
+                "Gemini upload returned no file URI."
+            )
+
+        print(
+            f"[GEMINI VIDEO] File name: {file_name}",
+            flush=True,
+        )
+
+        print(
+            f"[GEMINI VIDEO] File URI: {file_uri}",
+            flush=True,
+        )
+
+        print(
+            f"[GEMINI VIDEO] Initial state: {state}",
+            flush=True,
+        )
+
+        return {
+            "name": file_name,
+            "uri": file_uri,
+            "mime_type": file_mime,
+            "state": state,
+        }
+
+    def _get_file(
+        self,
+        file_name: str,
+    ) -> Dict[str, Any]:
+
+        url = (
+            f"{self.BASE_URL}/{file_name}"
+        )
+
+        response = requests.get(
+            url,
+            params={
+                "key": self.api_key,
+            },
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                "Gemini file status failed: "
+                f"HTTP {response.status_code}: "
+                f"{response.text[:2000]}"
+            )
+
+        data = response.json()
+
+        return data.get(
+            "file",
+            data,
+        )
+
+    def _wait_for_video(
+        self,
+        file_name: str,
+    ) -> Dict[str, Any]:
+
+        if not file_name:
+            raise RuntimeError(
+                "Gemini file name is missing."
+            )
+
+        started = time.time()
+
+        print(
+            "[GEMINI VIDEO] Waiting for processing...",
+            flush=True,
+        )
+
+        while True:
+
+            elapsed = time.time() - started
+
+            if elapsed > self.PROCESS_TIMEOUT:
+                raise RuntimeError(
+                    "Gemini video processing timed out."
+                )
+
+            info = self._get_file(
+                file_name
+            )
+
+            state = info.get("state")
+
+            print(
+                f"[GEMINI VIDEO] State: {state}",
+                flush=True,
+            )
+
+            if state == "ACTIVE":
+                print(
+                    "[GEMINI VIDEO] Video is ACTIVE and ready.",
+                    flush=True,
+                )
+
+                return info
+
+            if state == "FAILED":
+                raise RuntimeError(
+                    "Gemini failed to process video."
+                )
+
+            time.sleep(
+                self.POLL_SECONDS
+            )
+
+    def _delete_video(
+        self,
+        file_name: Optional[str],
+    ):
+
+        if not file_name:
+            return
+
+        try:
+
+            url = (
+                f"{self.BASE_URL}/{file_name}"
+            )
+
+            response = requests.delete(
+                url,
+                params={
+                    "key": self.api_key,
+                },
+                timeout=30,
+            )
+
+            print(
+                "[GEMINI VIDEO] Temporary file deleted "
+                f"(HTTP {response.status_code}).",
+                flush=True,
+            )
+
+        except Exception as exc:
+
+            print(
+                "[GEMINI VIDEO] Cleanup warning: "
+                f"{exc}",
+                flush=True,
+            )
+
+    # ---------------------------------------------------------
     # PROMPT
-    # ========================================================
+    # ---------------------------------------------------------
 
     def _build_prompt(
         self,
         data: Dict[str, str],
     ) -> str:
 
-        filename = data.get(
-            "filename",
-            "",
+        transcript = (
+            data["full_transcript"]
+            [:self.MAX_TRANSCRIPT_CHARS]
         )
 
-        source_language = data.get(
-            "source_language",
-            "unknown",
+        context = (
+            data["relevant_context"]
+            [:self.MAX_CONTEXT_CHARS]
         )
 
-        confidence = data.get(
-            "language_confidence",
-            "",
+        highlight = (
+            data["highlight_text"]
+            [:self.MAX_HIGHLIGHT_CHARS]
         )
 
-        transcript = data.get(
-            "full_transcript",
-            "",
-        )
+        return f"""
+You are the professional AI narrator for SUN SPY RECAP.
 
-        context = data.get(
-            "relevant_context",
-            "",
-        )
-
-        highlight = data.get(
-            "highlight_text",
-            "",
-        )
-
-        # Limit individual evidence sections.
-        transcript = transcript[
-            :self.MAX_TRANSCRIPT_CHARS
-        ]
-
-        context = context[
-            :self.MAX_CONTEXT_CHARS
-        ]
-
-        highlight = highlight[
-            :self.MAX_HIGHLIGHT_CHARS
-        ]
-
-        prompt = f"""
-You are the professional Burmese recap writer for SUN SPY RECAP.
-
-Your job is to understand the ACTUAL CONTENT of the supplied video transcript
-and write an accurate, natural Burmese-language recap.
+Your job is to create ONE accurate Burmese recap of the
+ACTUAL uploaded video.
 
 IMPORTANT:
-The original video can be in ANY language.
+You have access to the REAL VIDEO FILE.
 
-The output MUST ALWAYS be Burmese.
+You MUST watch/analyze the actual video.
 
-Do NOT assume the topic from:
-- the filename
-- the source language
-- the country
-- the culture
-- the accent
-- the language itself
-
-For example:
-Chinese language does NOT automatically mean China, Chinese culture,
-Chinese society, traditions, or Chinese history.
-
-English language does NOT automatically mean America, Britain, or Western culture.
-
-You must use the actual transcript evidence.
+Do not rely only on the transcript.
 
 ==================================================
-VIDEO INFORMATION
+VIDEO EVIDENCE
 ==================================================
 
-Filename:
-{filename}
+Analyze:
 
-Detected source language:
-{source_language}
+- what people are doing
+- what people are saying
+- who is speaking
+- important objects
+- locations that are actually visible
+- actions
+- expressions
+- important visual events
+- religious objects
+- Buddha statues
+- lamps
+- ceremonies
+- signs or text visible in the video
+- important sounds
+- dialogue
+- narration
+- sequence of events
 
-Language confidence:
-{confidence}
+Only state things that are actually supported by
+the video or clearly supported by the speech.
 
 ==================================================
-SELECTED HIGHLIGHT TRANSCRIPT
+WHISPER TRANSCRIPT
 ==================================================
 
-{highlight}
+The following transcript was generated automatically.
+
+It may contain recognition errors.
+
+Therefore:
+
+VIDEO > CLEAR SPEECH > TRANSCRIPT
+
+If the transcript conflicts with clearly audible speech
+or visible video, trust the actual video.
+
+Transcript:
+
+{transcript}
 
 ==================================================
-RELEVANT CONTEXT AROUND THE HIGHLIGHT
+SELECTED CONTEXT
 ==================================================
 
 {context}
 
 ==================================================
-FULL TRANSCRIPT
+SELECTED HIGHLIGHT
 ==================================================
 
-{transcript}
+{highlight}
 
 ==================================================
-STRICT RECAP RULES
+SOURCE LANGUAGE
 ==================================================
 
-1. Understand the actual meaning before writing.
+Detected language:
+{data["source_language"]}
 
-2. Identify the real subject of the video from the evidence.
+Confidence:
+{data["language_confidence"]}
 
-3. Focus on the most important:
-   - event
-   - action
-   - explanation
-   - teaching
-   - story point
-   - discovery
-   - fact
-   - argument
-   - dialogue
-   - instruction
-   - emotional moment
-
-4. Use the relevant context and highlight as important evidence,
-   but cross-check them against the full transcript.
-
-5. If the highlight is not meaningful, use the strongest clear information
-   from the transcript instead.
-
-6. Do NOT invent facts.
-
-7. Do NOT hallucinate:
-   - country
-   - city
-   - people
-   - religion
-   - culture
-   - tradition
-   - historical event
-   - location
-   - occupation
-   - relationship
-   unless the transcript clearly supports it.
-
-8. Do NOT infer the topic from the language.
-
-9. Do NOT infer the topic from the filename.
-
-10. If the transcript is incomplete or unclear, summarize ONLY what is clearly
-    supported by the transcript.
-
-11. If there is dialogue, preserve the actual meaning of the dialogue.
-
-12. Do NOT translate every sentence literally.
-
-13. Rewrite naturally in Burmese.
-
-14. The narration should sound like a real human Burmese narrator.
-
-15. Do NOT begin with:
-    "ဒီဗီဒီယိုလေးမှာတော့..."
-    "ဒီဗီဒီယိုမှာတော့..."
-    "ဒီဗီဒီယိုထဲမှာတော့..."
-
-16. Do NOT use generic YouTube/TikTok introductions.
-
-17. Do NOT say:
-    "အဆုံးထိကြည့်ရှုလိုက်ကြရအောင်"
-
-18. Do NOT say:
-    "စိတ်ဝင်စားစရာအကြောင်းအရာတစ်ခုကို..."
-
-19. Do NOT describe the video broadly as social life, culture,
-    traditions, or society unless the transcript explicitly supports it.
-
-20. Do NOT mention:
-    - AI
-    - Gemini
-    - prompt
-    - transcript
-    - language model
-    - these instructions
-
-21. Do NOT use:
-    - headings
-    - bullet points
-    - hashtags
-    - emojis
-    - markdown
-
-22. Write approximately 120–220 Burmese words when enough information exists.
-
-23. The recap must be specific to THIS video.
-
-24. A generic recap that could describe almost any video is INVALID.
-
-25. If the evidence only supports a narrow statement, keep the recap narrow
-    instead of inventing additional information.
+The source language does NOT determine the topic.
 
 ==================================================
-OUTPUT
+CRITICAL ANTI-HALLUCINATION RULES
 ==================================================
 
-Return ONLY the final Burmese recap.
+DO NOT invent:
 
-No explanation.
-No English.
-No heading.
+- names
+- locations
+- countries
+- dates
+- historical facts
+- relationships
+- religious teachings
+- motives
+- events
+- emotions
+
+unless the video clearly supports them.
+
+Do not interpret ordinary conversation as violence,
+threats, pleading, recording, fighting, or abuse unless
+those things are actually clear from the video.
+
+Do not turn uncertain Whisper words into facts.
+
+If speech is unclear, describe the clearly visible events.
+
+If visuals are unclear, use clearly audible speech.
+
+If both are clear, combine them.
+
+==================================================
+BURMESE OUTPUT
+==================================================
+
+Write natural spoken Burmese.
+
+The recap should sound like a human Burmese narrator,
+not an AI disclaimer.
+
+Do NOT begin with:
+
+"ဒီဗီဒီယိုလေးမှာတော့"
+"ဒီဗီဒီယိုမှာတော့"
+"ဒီဗီဒီယိုထဲမှာတော့"
+"SUN SPY RECAP မှ တင်ဆက်ပေးလိုက်ပါတယ်"
+
+Do NOT say:
+
+"အဆုံးထိကြည့်ရှုလိုက်ကြရအောင်"
+
+Do NOT explain your analysis.
+
+Do NOT mention Whisper.
+
+Do NOT mention Gemini.
+
+Do NOT mention AI.
+
+Do NOT say that information is insufficient unless
+the actual video genuinely contains almost no usable
+information.
+
+Instead, describe what is actually happening.
+
+Length:
+approximately 100–220 Burmese words.
+
+Return ONLY the Burmese narration.
+
+No title.
+No headings.
+No bullets.
+No hashtags.
+No emojis.
 No markdown.
-No quotation marks around the answer.
 """.strip()
 
-        return prompt
-
-    # ========================================================
-    # GEMINI API
-    # ========================================================
-
-    def _call_gemini(
-        self,
-        model: str,
-        prompt: str,
-    ) -> str:
-
-        if not self.api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY or GOOGLE_API_KEY "
-                "is not configured."
-            )
-
-        url = (
-            f"{self.base_url}/"
-            f"{model}:generateContent"
-        )
-
-        params = {
-            "key": self.api_key,
-        }
-
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [
-                        {
-                            "text": prompt,
-                        }
-                    ],
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.15,
-                "topP": 0.80,
-                "topK": 20,
-                "maxOutputTokens": 1200,
-            },
-        }
-
-        print(
-            f"[GEMINI] Calling model: {model}",
-            flush=True,
-        )
-
-        response = requests.post(
-            url,
-            params=params,
-            json=payload,
-            timeout=self.REQUEST_TIMEOUT,
-        )
-
-        if response.status_code != 200:
-
-            body = response.text[:4000]
-
-            raise RuntimeError(
-                f"Gemini API HTTP "
-                f"{response.status_code}: {body}"
-            )
-
-        try:
-            result = response.json()
-        except Exception as error:
-            raise RuntimeError(
-                f"Gemini returned invalid JSON: "
-                f"{error}"
-            )
-
-        text = self._extract_text(
-            result
-        )
-
-        if not text:
-            raise RuntimeError(
-                "Gemini response contained no text."
-            )
-
-        return text
-
-    # ========================================================
-    # RESPONSE EXTRACTION
-    # ========================================================
+    # ---------------------------------------------------------
+    # GEMINI GENERATE
+    # ---------------------------------------------------------
 
     @staticmethod
     def _extract_text(
-        response: Dict[str, Any],
+        data: Dict[str, Any],
     ) -> str:
 
-        candidates = response.get(
+        candidates = data.get(
             "candidates",
             [],
         )
@@ -632,9 +735,7 @@ No quotation marks around the answer.
         if not candidates:
             return ""
 
-        candidate = candidates[0] or {}
-
-        content = candidate.get(
+        content = candidates[0].get(
             "content",
             {},
         )
@@ -668,9 +769,96 @@ No quotation marks around the answer.
             output
         ).strip()
 
-    # ========================================================
-    # MAIN
-    # ========================================================
+    def _call_gemini(
+        self,
+        model: str,
+        prompt: str,
+        video: Dict[str, Any],
+    ) -> str:
+
+        url = (
+            f"{self.BASE_URL}/models/"
+            f"{model}:generateContent"
+        )
+
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": prompt,
+                        },
+                        {
+                            "file_data": {
+                                "mime_type": (
+                                    video["mime_type"]
+                                ),
+                                "file_uri": (
+                                    video["uri"]
+                                ),
+                            }
+                        },
+                    ],
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.15,
+                "topP": 0.80,
+                "topK": 20,
+                "maxOutputTokens": 1200,
+            },
+        }
+
+        print(
+            "================================================",
+            flush=True,
+        )
+
+        print(
+            "[GEMINI] Sending ACTUAL VIDEO + transcript...",
+            flush=True,
+        )
+
+        print(
+            f"[GEMINI] Model: {model}",
+            flush=True,
+        )
+
+        response = requests.post(
+            url,
+            params={
+                "key": self.api_key,
+            },
+            json=payload,
+            timeout=self.REQUEST_TIMEOUT,
+        )
+
+        if response.status_code != 200:
+
+            raise RuntimeError(
+                f"Gemini API HTTP "
+                f"{response.status_code}: "
+                f"{response.text[:5000]}"
+            )
+
+        data = response.json()
+
+        text = self._extract_text(
+            data
+        )
+
+        if not text:
+
+            raise RuntimeError(
+                "Gemini returned no text."
+            )
+
+        return text
+
+    # ---------------------------------------------------------
+    # PUBLIC
+    # ---------------------------------------------------------
 
     def create_recap(
         self,
@@ -681,124 +869,145 @@ No quotation marks around the answer.
             data
         )
 
-        transcript = normalized.get(
-            "full_transcript",
-            "",
-        )
+        video_path = normalized[
+            "video_path"
+        ]
 
-        context = normalized.get(
-            "relevant_context",
-            "",
-        )
-
-        highlight = normalized.get(
-            "highlight_text",
-            "",
-        )
-
-        if not transcript:
+        if not video_path:
             raise RuntimeError(
-                "Cannot create recap because "
-                "transcript is empty."
+                "video_path is required for "
+                "multimodal recap."
             )
 
-        if (
-            len(transcript.strip()) < 20
-            and not context
-            and not highlight
-        ):
+        if not Path(video_path).exists():
             raise RuntimeError(
-                "Transcript contains insufficient "
-                "information for a reliable recap."
+                f"Video does not exist: "
+                f"{video_path}"
+            )
+
+        if not self.api_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY is not configured."
             )
 
         prompt = self._build_prompt(
             normalized
         )
 
-        models = []
-
-        if self.model:
-            models.append(
-                self.model
+        models = list(
+            dict.fromkeys(
+                [
+                    self.model,
+                    self.fallback_model,
+                ]
             )
+        )
 
-        if (
-            self.fallback_model
-            and self.fallback_model
-            not in models
-        ):
-            models.append(
-                self.fallback_model
-            )
-
-        if not models:
-            raise RuntimeError(
-                "No Gemini model configured."
-            )
-
+        uploaded = None
         errors = []
 
-        for model in models:
+        try:
 
-            try:
+            # Upload actual video
+            uploaded = self._upload_video(
+                video_path
+            )
 
-                raw_recap = self._call_gemini(
-                    model,
-                    prompt,
-                )
+            # Wait until Gemini can analyze it
+            active_file = self._wait_for_video(
+                uploaded["name"]
+            )
 
-                recap = self._validate_recap(
-                    raw_recap
-                )
+            # Refresh URI if available
+            uploaded["uri"] = (
+                active_file.get("uri")
+                or uploaded["uri"]
+            )
 
-                print(
-                    f"[NARRATOR] Valid Burmese recap "
-                    f"generated by {model}.",
-                    flush=True,
-                )
+            uploaded["mime_type"] = (
+                active_file.get("mimeType")
+                or uploaded["mime_type"]
+            )
 
-                return {
-                    "text": recap,
-                    "engine": "gemini",
-                    "model": model,
-                    "language": "my",
-                }
+            for model in models:
 
-            except Exception as error:
+                try:
 
-                error_text = (
-                    f"{type(error).__name__}: "
-                    f"{error}"
-                )
+                    raw = self._call_gemini(
+                        model=model,
+                        prompt=prompt,
+                        video=uploaded,
+                    )
 
-                errors.append(
-                    f"{model} -> {error_text}"
-                )
+                    recap = self._validate_recap(
+                        raw
+                    )
 
-                print(
-                    f"[NARRATOR] Model failed: "
-                    f"{error_text}",
-                    flush=True,
+                    print(
+                        "================================================",
+                        flush=True,
+                    )
+
+                    print(
+                        "[NARRATOR] FINAL BURMESE RECAP:",
+                        flush=True,
+                    )
+
+                    print(
+                        recap,
+                        flush=True,
+                    )
+
+                    print(
+                        "================================================",
+                        flush=True,
+                    )
+
+                    return {
+                        "text": recap,
+                        "engine": (
+                            "gemini-multimodal"
+                        ),
+                        "model": model,
+                        "language": "my",
+                    }
+
+                except Exception as exc:
+
+                    message = (
+                        f"{type(exc).__name__}: "
+                        f"{exc}"
+                    )
+
+                    errors.append(
+                        f"{model} -> {message}"
+                    )
+
+                    print(
+                        f"[NARRATOR] {model} failed: "
+                        f"{message}",
+                        flush=True,
+                    )
+
+        finally:
+
+            if uploaded:
+
+                self._delete_video(
+                    uploaded.get(
+                        "name"
+                    )
                 )
 
         raise RuntimeError(
-            "All Gemini recap models failed. "
-            "No generic fallback was generated. "
+            "All Gemini multimodal recap attempts "
+            "failed. "
             + " | ".join(errors)
         )
 
 
-# ============================================================
-# GLOBAL NARRATOR INSTANCE
-# ============================================================
-
 narrator = Narrator()
 
-
-# ============================================================
-# BACKWARD-COMPATIBLE HELPER
-# ============================================================
 
 def create_recap(data):
     return narrator.create_recap(data)
