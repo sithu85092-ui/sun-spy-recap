@@ -152,12 +152,10 @@ async def process_video(job_id):
     job = get_job(job_id)
 
     if job is None:
-
         print(
             f"[JOB] Not found: {job_id}",
             flush=True,
         )
-
         return
 
     input_key = job["input_file"]
@@ -212,13 +210,44 @@ async def process_video(job_id):
                 f"B2 download failed: {input_key}"
             )
 
-        if input_file.stat().st_size < 1000:
+        input_size = input_file.stat().st_size
+
+        if input_size < 1000:
             raise RuntimeError(
                 "Downloaded video is empty."
             )
 
         print(
             f"[B2] Input ready: {input_file}",
+            flush=True,
+        )
+
+        print(
+            f"[B2] Input size: "
+            f"{input_size / 1024 / 1024:.2f} MB",
+            flush=True,
+        )
+
+        # ====================================================
+        # IMPORTANT:
+        # Gemini will receive THIS ACTUAL VIDEO FILE.
+        # Do not remove or rename it before narration.
+        # ====================================================
+
+        print(
+            "[GEMINI VIDEO] Actual video available for "
+            "multimodal analysis.",
+            flush=True,
+        )
+
+        print(
+            f"[GEMINI VIDEO] Path: {input_file}",
+            flush=True,
+        )
+
+        print(
+            f"[GEMINI VIDEO] Exists: "
+            f"{input_file.exists()}",
             flush=True,
         )
 
@@ -388,10 +417,12 @@ async def process_video(job_id):
         except Exception:
             language_probability = 0.0
 
-        if not transcript:
-            raise RuntimeError(
-                "No speech was detected in the video."
-            )
+        # ----------------------------------------------------
+        # IMPORTANT:
+        # We don't fail immediately when Whisper gives
+        # little/no text because Gemini can understand
+        # the actual video visually/audio-wise.
+        # ----------------------------------------------------
 
         print(
             "================================================",
@@ -422,7 +453,8 @@ async def process_video(job_id):
         )
 
         print(
-            transcript[:2000],
+            transcript[:2000] if transcript else
+            "[NO RELIABLE TRANSCRIPT]",
             flush=True,
         )
 
@@ -492,9 +524,23 @@ async def process_video(job_id):
             highlight,
             dict,
         ) or not highlight:
-            raise RuntimeError(
-                "Could not find a suitable highlight."
+
+            # If analyzer cannot produce a highlight,
+            # use the complete video as fallback.
+            print(
+                "[ANALYZER] No highlight returned. "
+                "Using full video as fallback.",
+                flush=True,
             )
+
+            highlight = {
+                "start": 0.0,
+                "duration": min(
+                    30.0,
+                    duration,
+                ),
+                "text": "",
+            }
 
         try:
             highlight_start = float(
@@ -626,7 +672,7 @@ async def process_video(job_id):
         )
 
         # ====================================================
-        # 6. BUILD STRUCTURED RECAP INPUT
+        # 6. BUILD MULTIMODAL RECAP INPUT
         # ====================================================
 
         update_job(
@@ -640,6 +686,10 @@ async def process_video(job_id):
         )
 
         recap_input = {
+            # ------------------------------------------------
+            # Existing evidence
+            # ------------------------------------------------
+
             "filename": input_file.name,
 
             "source_language": (
@@ -655,11 +705,55 @@ async def process_video(job_id):
             "relevant_context": context,
 
             "highlight_text": highlight_text,
+
+            # ------------------------------------------------
+            # CRITICAL NEW FIELD
+            #
+            # narrator.py uses this to upload the ACTUAL
+            # MP4 to Gemini Files API.
+            # ------------------------------------------------
+
+            "video_path": str(input_file),
+
+            # ------------------------------------------------
+            # Additional useful metadata
+            # ------------------------------------------------
+
+            "video_duration": duration,
+
+            "highlight_start": highlight_start,
+
+            "highlight_duration": highlight_duration,
+
+            "scenes": scenes,
         }
 
         print(
-            "[NARRATOR] Sending structured "
-            "video evidence to Gemini...",
+            "================================================",
+            flush=True,
+        )
+
+        print(
+            "[NARRATOR] Sending ACTUAL VIDEO + "
+            "transcript evidence to Gemini...",
+            flush=True,
+        )
+
+        print(
+            f"[NARRATOR] Video path: "
+            f"{input_file}",
+            flush=True,
+        )
+
+        print(
+            f"[NARRATOR] Video exists: "
+            f"{input_file.exists()}",
+            flush=True,
+        )
+
+        print(
+            f"[NARRATOR] Video size: "
+            f"{input_file.stat().st_size / 1024 / 1024:.2f} MB",
             flush=True,
         )
 
@@ -687,8 +781,13 @@ async def process_video(job_id):
             flush=True,
         )
 
+        print(
+            "================================================",
+            flush=True,
+        )
+
         # ====================================================
-        # 7. GEMINI BURMESE RECAP
+        # 7. GEMINI BURMESE MULTIMODAL RECAP
         # ====================================================
 
         recap_result = await asyncio.to_thread(
@@ -737,9 +836,9 @@ async def process_video(job_id):
                 "AI recap returned empty text."
             )
 
-        # ----------------------------------------------------
-        # Additional worker-level safety check.
-        # ----------------------------------------------------
+        # ====================================================
+        # 7A. WORKER-LEVEL QUALITY CHECK
+        # ====================================================
 
         forbidden_generic = [
             "ဒီဗီဒီယိုလေးမှာတော့",
@@ -751,6 +850,9 @@ async def process_video(job_id):
             "စိတ်ဝင်စားဖွယ်အကြောင်းအရာ",
             "လူမှုဘဝနဲ့ ဓလေ့ထုံးတမ်း",
             "လူမှုဘဝနှင့် ဓလေ့ထုံးတမ်း",
+            "အဖြစ်အပျက်တစ်ခုကို မြင်တွေ့ရပါတယ်",
+            "အော်ဟစ်တောင်းပန်သံတွေ",
+            "စိုးရိမ်ပူပန်သံတွေ",
         ]
 
         generic_matches = 0
@@ -764,9 +866,17 @@ async def process_video(job_id):
 
         if generic_matches >= 2:
             raise RuntimeError(
-                "AI returned a generic recap. "
-                "The result was rejected instead "
-                "of publishing potentially unrelated content."
+                "AI returned a generic/unrelated recap. "
+                "The result was rejected."
+            )
+
+        # ----------------------------------------------------
+        # Reject very short useless responses.
+        # ----------------------------------------------------
+
+        if len(recap_text) < 30:
+            raise RuntimeError(
+                "AI recap is too short to be useful."
             )
 
         print(
