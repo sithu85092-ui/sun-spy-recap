@@ -53,6 +53,16 @@ from backend.services.renderer import (
 )
 
 
+# ==========================================
+# BACKBLAZE B2
+# ==========================================
+
+from backend.services.b2_storage import (
+    download_file,
+    upload_file,
+)
+
+
 def update_job(
     job_id,
     *,
@@ -183,19 +193,77 @@ async def process_video(
 
         return
 
-    input_file = Path(
-        job["input_file"]
+    # ==========================================
+    # B2 INPUT
+    # ==========================================
+
+    input_key = job["input_file"]
+
+    if not input_key:
+
+        raise RuntimeError(
+            "Job has no input file."
+        )
+
+    # Render local temporary file.
+    input_file = (
+        TEMP_DIR /
+        f"{job_id}_input.mp4"
     )
 
     try:
 
+        TEMP_DIR.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        # ==========================================
+        # 0. DOWNLOAD INPUT FROM B2
+        # ==========================================
+
+        update_job(
+            job_id,
+
+            status="PROCESSING",
+
+            progress=2,
+
+            message=(
+                "Downloading video from storage..."
+            ),
+        )
+
+        print(
+            f"[B2] Downloading input: "
+            f"{input_key}",
+            flush=True,
+        )
+
+        await asyncio.to_thread(
+            download_file,
+            input_key,
+            input_file,
+        )
+
         if not input_file.exists():
 
             raise FileNotFoundError(
-                f"Input video not found: "
-                f"{input_file}"
+                f"B2 download failed: "
+                f"{input_key}"
             )
 
+        if input_file.stat().st_size < 1000:
+
+            raise RuntimeError(
+                "Downloaded video is empty."
+            )
+
+        print(
+            f"[B2] Input ready: "
+            f"{input_file}",
+            flush=True,
+        )
 
         # =================================
         # 1. INSPECT
@@ -242,7 +310,6 @@ async def process_video(
             flush=True,
         )
 
-
         # =================================
         # 2. AUDIO
         # =================================
@@ -283,7 +350,6 @@ async def process_video(
                 "audio_file"
             ]
         )
-
 
         # =================================
         # 3. WHISPER
@@ -342,12 +408,10 @@ async def process_video(
                 "in the video."
             )
 
-
         print(
             "[JOB] Whisper completed.",
             flush=True,
         )
-
 
         # =================================
         # 4. HIGHLIGHT
@@ -392,13 +456,11 @@ async def process_video(
                 "suitable highlight."
             )
 
-
         print(
             f"[JOB] Highlight: "
             f"{highlight}",
             flush=True,
         )
-
 
         # =================================
         # 5. CLIP
@@ -430,21 +492,27 @@ async def process_video(
             )
         )
 
-        if not Path(
+        clip_path = Path(
             clip_path
-        ).exists():
+        )
+
+        if not clip_path.exists():
 
             raise RuntimeError(
                 "Highlight clip was "
                 "not created."
             )
 
+        if clip_path.stat().st_size < 1000:
+
+            raise RuntimeError(
+                "Highlight clip is empty."
+            )
 
         print(
             "[JOB] Highlight clip created.",
             flush=True,
         )
-
 
         # =================================
         # 6. BURMESE RECAP
@@ -493,7 +561,6 @@ async def process_video(
                 "empty text."
             )
 
-
         # =================================
         # 7. BURMESE TTS
         # =================================
@@ -517,10 +584,15 @@ async def process_video(
 
         await synthesize(
             recap_text,
-
             narration_path,
         )
 
+        if not narration_path.exists():
+
+            raise RuntimeError(
+                "Narration audio was "
+                "not created."
+            )
 
         # =================================
         # 8. SUBTITLES
@@ -545,10 +617,15 @@ async def process_video(
 
         create_srt(
             segments,
-
             subtitle_path,
         )
 
+        if not subtitle_path.exists():
+
+            raise RuntimeError(
+                "Subtitle file was "
+                "not created."
+            )
 
         # =================================
         # 9. FINAL 9:16
@@ -580,15 +657,65 @@ async def process_video(
             )
         )
 
-
-        if not Path(
+        final_path = Path(
             final_path
-        ).exists():
+        )
+
+        if not final_path.exists():
 
             raise RuntimeError(
                 "Final video was not created."
             )
 
+        if final_path.stat().st_size < 1000:
+
+            raise RuntimeError(
+                "Final video is empty."
+            )
+
+        print(
+            f"[JOB] Final video rendered: "
+            f"{final_path}",
+            flush=True,
+        )
+
+        # =================================
+        # 9.5 UPLOAD FINAL TO B2
+        # =================================
+
+        update_job(
+            job_id,
+
+            status="RENDERING",
+
+            progress=94,
+
+            message=(
+                "Uploading final video..."
+            ),
+        )
+
+        final_key = (
+            f"outputs/{job_id}_final.mp4"
+        )
+
+        print(
+            f"[B2] Uploading final: "
+            f"{final_key}",
+            flush=True,
+        )
+
+        await asyncio.to_thread(
+            upload_file,
+            final_path,
+            final_key,
+        )
+
+        print(
+            f"[B2] Final upload complete: "
+            f"{final_key}",
+            flush=True,
+        )
 
         # =================================
         # 10. COMPLETE
@@ -605,9 +732,7 @@ async def process_video(
                 "Final recap created successfully."
             ),
 
-            output_file=str(
-                final_path
-            ),
+            output_file=final_key,
 
             recap_text=recap_text,
 
@@ -621,7 +746,6 @@ async def process_video(
             f"[JOB COMPLETE] {job_id}",
             flush=True,
         )
-
 
     except Exception as error:
 
@@ -655,5 +779,31 @@ async def process_video(
                 "[JOB] Failed to update "
                 f"failure status: "
                 f"{update_error}",
+                flush=True,
+            )
+
+    finally:
+
+        # =================================
+        # CLEAN TEMPORARY INPUT
+        # =================================
+
+        try:
+
+            if input_file.exists():
+
+                input_file.unlink()
+
+                print(
+                    "[CLEANUP] Temporary input "
+                    "removed.",
+                    flush=True,
+                )
+
+        except Exception as cleanup_error:
+
+            print(
+                "[CLEANUP] Input cleanup failed: "
+                f"{cleanup_error}",
                 flush=True,
             )
