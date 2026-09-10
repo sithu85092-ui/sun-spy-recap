@@ -1,5 +1,10 @@
 from pathlib import Path
+import re
 
+
+# ==========================================
+# TIMESTAMP
+# ==========================================
 
 def format_timestamp(seconds):
     seconds = max(
@@ -34,136 +39,237 @@ def format_timestamp(seconds):
     )
 
 
-def create_srt(
-    segments,
-    output_path,
-    clip_start=0.0,
-    clip_duration=None,
-):
-    """
-    Create subtitles for the selected highlight clip.
+# ==========================================
+# BURMESE TEXT → SENTENCES
+# ==========================================
 
-    Important:
-    - Original transcript timestamps are converted
-      to timestamps relative to the highlight clip.
-    - Only subtitles that overlap the selected clip
-      are included.
-    - This prevents subtitles from appearing outside
-      the final video.
+def split_sentences(text):
+    """
+    Split Burmese narration into subtitle-sized
+    sentences/phrases.
     """
 
-    output_path = Path(output_path)
+    text = str(text or "").strip()
 
-    clip_start = max(
-        0.0,
-        float(clip_start),
+    if not text:
+        return []
+
+    # Burmese / English sentence endings
+    parts = re.split(
+        r"(?<=[။!?])\s+|(?<=[.!?])\s+",
+        text,
     )
 
-    if clip_duration is not None:
-        clip_duration = max(
-            0.5,
-            float(clip_duration),
+    parts = [
+        part.strip()
+        for part in parts
+        if part.strip()
+    ]
+
+    # If AI returned one very long paragraph,
+    # split it into smaller chunks.
+    result = []
+
+    for part in parts:
+
+        if len(part) <= 55:
+            result.append(part)
+            continue
+
+        words = part.split()
+
+        current = ""
+
+        for word in words:
+
+            candidate = (
+                f"{current} {word}"
+                if current
+                else word
+            )
+
+            if len(candidate) <= 55:
+                current = candidate
+
+            else:
+
+                if current:
+                    result.append(
+                        current.strip()
+                    )
+
+                current = word
+
+        if current:
+            result.append(
+                current.strip()
+            )
+
+    return result
+
+
+# ==========================================
+# CREATE BURMESE NARRATOR SRT
+# ==========================================
+
+def create_srt(
+    text,
+    output_path,
+    duration=None,
+):
+    """
+    Create subtitles from the Burmese narrator text.
+
+    Parameters
+    ----------
+    text:
+        Burmese recap/narration text.
+
+    output_path:
+        Destination .srt file.
+
+    duration:
+        Total duration of the narrator audio.
+
+    Important:
+        This does NOT use the original transcript.
+        The subtitle follows the Burmese narrator.
+    """
+
+    output_path = Path(
+        output_path
+    )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    text = str(
+        text or ""
+    ).strip()
+
+    if not text:
+        raise ValueError(
+            "Subtitle text is empty."
         )
 
-    clip_end = None
-
-    if clip_duration is not None:
-        clip_end = (
-            clip_start
-            + clip_duration
+    if duration is None:
+        raise ValueError(
+            "Narration duration is required."
         )
+
+    duration = max(
+        0.5,
+        float(duration),
+    )
+
+    sentences = split_sentences(
+        text
+    )
+
+    if not sentences:
+        raise ValueError(
+            "Could not split subtitle text."
+        )
+
+    # ==========================================
+    # Calculate duration by text length
+    # ==========================================
+
+    total_length = sum(
+        max(
+            1,
+            len(sentence),
+        )
+        for sentence in sentences
+    )
 
     blocks = []
 
-    number = 1
+    current_time = 0.0
 
-    for segment in segments or []:
+    for index, sentence in enumerate(
+        sentences,
+        start=1,
+    ):
 
-        text = str(
-            segment.get(
-                "text",
-                "",
-            )
-        ).strip()
+        text_length = max(
+            1,
+            len(sentence),
+        )
 
-        if not text:
-            continue
+        # Give each subtitle a proportional
+        # amount of narration time.
+        block_duration = (
+            duration
+            * text_length
+            / total_length
+        )
 
-        original_start = max(
-            0.0,
-            float(
-                segment.get(
-                    "start",
-                    0,
-                )
+        # Keep subtitles readable.
+        block_duration = max(
+            1.5,
+            min(
+                6.0,
+                block_duration,
             ),
         )
 
-        original_end = max(
-            original_start + 0.5,
-            float(
-                segment.get(
-                    "end",
-                    original_start + 2,
-                )
-            ),
-        )
+        start = current_time
 
-        # Ignore segments completely before clip
-        if (
-            clip_end is not None
-            and original_end <= clip_start
-        ):
-            continue
+        # Last subtitle must end exactly
+        # at the narration duration.
+        if index == len(sentences):
 
-        # Ignore segments completely after clip
-        if (
-            clip_end is not None
-            and original_start >= clip_end
-        ):
-            continue
+            end = duration
 
-        # Convert original timestamps
-        # to highlight-relative timestamps.
-        start = max(
-            0.0,
-            original_start - clip_start,
-        )
-
-        end = max(
-            start + 0.5,
-            original_end - clip_start,
-        )
-
-        # Never allow subtitle beyond clip
-        if clip_duration is not None:
-
-            start = min(
-                start,
-                clip_duration,
-            )
+        else:
 
             end = min(
-                end,
-                clip_duration,
+                duration,
+                start + block_duration,
             )
 
         if end <= start:
             continue
 
         blocks.append(
-            f"{number}\n"
+            f"{len(blocks) + 1}\n"
             f"{format_timestamp(start)} --> "
             f"{format_timestamp(end)}\n"
-            f"{text}\n"
+            f"{sentence}\n"
         )
 
-        number += 1
+        current_time = end
 
-    output_path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    # ==========================================
+    # Fix gaps / overflow
+    # ==========================================
+
+    if blocks:
+
+        # Rewrite the final subtitle end time
+        # to match narration exactly.
+        last_block = blocks[-1]
+
+        lines = last_block.splitlines()
+
+        if len(lines) >= 3:
+
+            start_time = lines[1].split(
+                " --> "
+            )[0]
+
+            lines[1] = (
+                f"{start_time} --> "
+                f"{format_timestamp(duration)}"
+            )
+
+            blocks[-1] = (
+                "\n".join(lines)
+                + "\n"
+            )
 
     output_path.write_text(
         "\n".join(blocks),
@@ -171,7 +277,19 @@ def create_srt(
     )
 
     print(
-        f"[SRT] Created {number - 1} subtitle blocks: "
+        f"[SRT] Created "
+        f"{len(blocks)} Burmese subtitle blocks.",
+        flush=True,
+    )
+
+    print(
+        f"[SRT] Narration duration: "
+        f"{duration:.2f}s",
+        flush=True,
+    )
+
+    print(
+        f"[SRT] File: "
         f"{output_path}",
         flush=True,
     )
