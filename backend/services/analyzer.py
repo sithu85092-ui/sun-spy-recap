@@ -7,11 +7,6 @@ def choose_highlight(
     clip_duration=30.0,
     transcript_segments=None,
 ):
-    """
-    Fast highlight selection for Render Free.
-    Avoids running full-video FFmpeg scene detection.
-    """
-
     path = Path(video_path)
 
     if not path.exists():
@@ -19,9 +14,6 @@ def choose_highlight(
             f"Video not found: {path}"
         )
 
-    duration = float(clip_duration)
-
-    # Prefer transcript segments containing interesting keywords.
     if transcript_segments:
 
         keywords = re.compile(
@@ -36,62 +28,47 @@ def choose_highlight(
 
         for segment in transcript_segments:
 
-            text = segment.get(
-                "text",
-                "",
-            )
+            text = segment.get("text", "")
 
             if keywords.search(text):
 
                 start = max(
                     0.0,
                     float(
-                        segment.get(
-                            "start",
-                            0.0,
-                        )
+                        segment.get("start", 0.0)
                     ) - 3.0,
                 )
 
                 return {
                     "start": start,
-                    "duration": duration,
+                    "duration": clip_duration,
                     "score": 0.9,
                     "reason": "Transcript emphasis match",
                 }
 
-    # If no keyword is found, use the first meaningful
-    # transcript segment instead of scanning the whole video.
-    if transcript_segments:
-
+        # Use a middle transcript segment
+        # when no keyword is found.
         segment = transcript_segments[
-            min(
-                len(transcript_segments) - 1,
-                len(transcript_segments) // 2,
-            )
+            len(transcript_segments) // 2
         ]
 
         start = max(
             0.0,
             float(
-                segment.get(
-                    "start",
-                    0.0,
-                )
+                segment.get("start", 0.0)
             ) - 3.0,
         )
 
         return {
             "start": start,
-            "duration": duration,
+            "duration": clip_duration,
             "score": 0.5,
             "reason": "Transcript midpoint highlight",
         }
 
-    # Final fallback.
     return {
         "start": 0.0,
-        "duration": duration,
+        "duration": clip_duration,
         "score": 0.2,
-        "reason": "Beginning of video fallback",
+        "reason": "Beginning fallback",
     }
