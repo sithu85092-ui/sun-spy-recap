@@ -10,8 +10,6 @@ from fastapi import (
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.config import UPLOAD_DIR
-
 from backend.database import (
     SessionLocal,
     utcnow,
@@ -27,9 +25,7 @@ router = APIRouter(
 
 
 class RecapRequest(BaseModel):
-
     upload_id: str
-
     filename: str
 
 
@@ -37,24 +33,21 @@ class RecapRequest(BaseModel):
 async def create_recap(
     request: RecapRequest,
 ):
-
     filename = Path(
         request.filename
     ).name
 
-    upload_path = (
-        UPLOAD_DIR /
-        filename
-    )
-
-    if not upload_path.exists():
-
+    if not filename:
         raise HTTPException(
-            status_code=404,
-            detail=(
-                "Uploaded video not found"
-            ),
+            400,
+            "Filename is required",
         )
+
+    # Filename returned by /upload/complete
+    # is the actual B2 object filename.
+    input_key = (
+        f"uploads/{filename}"
+    )
 
     job_id = str(
         uuid.uuid4()
@@ -63,50 +56,31 @@ async def create_recap(
     db: Session = SessionLocal()
 
     try:
-
         job = Job(
-
             id=job_id,
-
             upload_id=request.upload_id,
-
             status="QUEUED",
-
             progress=0,
-
             message=(
                 "Job added to worker queue."
             ),
-
-            input_file=str(
-                upload_path
-            ),
-
+            input_file=input_key,
             output_file=None,
-
             error=None,
-
             recap_text=None,
-
             language="my",
-
             created_at=utcnow(),
-
             updated_at=utcnow(),
         )
 
         db.add(job)
-
         db.commit()
 
     except Exception:
-
         db.rollback()
-
         raise
 
     finally:
-
         db.close()
 
     print(
@@ -115,13 +89,9 @@ async def create_recap(
     )
 
     return {
-
         "success": True,
-
         "job_id": job_id,
-
         "status": "QUEUED",
-
         "message": (
             "Recap job added to worker queue."
         ),
