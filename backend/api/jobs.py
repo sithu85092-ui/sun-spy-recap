@@ -3,10 +3,15 @@ from fastapi import (
     Depends,
     HTTPException,
 )
+
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import Job
+
+from backend.services.b2_storage import (
+    create_download_url,
+)
 
 
 router = APIRouter(
@@ -15,7 +20,27 @@ router = APIRouter(
 )
 
 
-def serialize_job(job: Job):
+def serialize_job(
+    job: Job,
+):
+    output_url = None
+
+    if (
+        job.output_file
+        and job.status == "COMPLETED"
+    ):
+        try:
+            output_url = (
+                create_download_url(
+                    job.output_file,
+                    expires=3600,
+                )
+            )
+        except Exception as error:
+            print(
+                f"[B2 URL ERROR] {error}",
+                flush=True,
+            )
 
     return {
         "id": job.id,
@@ -24,7 +49,8 @@ def serialize_job(job: Job):
         "progress": job.progress,
         "message": job.message,
         "input_file": job.input_file,
-        "output_file": job.output_file,
+        "output_file": output_url,
+        "output_key": job.output_file,
         "error": job.error,
         "recap_text": job.recap_text,
         "language": job.language,
@@ -46,15 +72,15 @@ async def get_job_status(
     job_id: str,
     db: Session = Depends(get_db),
 ):
-
     job = (
         db.query(Job)
-        .filter(Job.id == job_id)
+        .filter(
+            Job.id == job_id
+        )
         .first()
     )
 
     if job is None:
-
         raise HTTPException(
             status_code=404,
             detail="Job not found",
