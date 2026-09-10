@@ -25,10 +25,11 @@ def _run(command):
         flush=True,
     )
 
+    # Do not keep large FFmpeg stderr output in RAM.
     result = subprocess.run(
         command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=None,
         text=True,
         check=True,
     )
@@ -43,15 +44,21 @@ def get_duration(video_path):
             "ffprobe is not installed"
         )
 
-    result = _run([
-        "ffprobe",
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-show_format",
-        str(video_path),
-    ])
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            str(video_path),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=True,
+    )
 
     data = json.loads(result.stdout)
 
@@ -82,6 +89,9 @@ def extract_audio(
     _run([
         "ffmpeg",
         "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-i",
         str(video_path),
         "-vn",
@@ -139,10 +149,13 @@ def cut_clip(
     )
 
     # Fast clip extraction.
-    # No video re-encoding here.
+    # No video re-encoding.
     _run([
         "ffmpeg",
         "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-ss",
         str(start),
         "-i",
@@ -201,6 +214,7 @@ def render_vertical_with_audio(
         OUTPUT_DIR / output_name
     )
 
+    # TikTok 9:16
     vertical_filter = (
         "scale=1080:1920:"
         "force_original_aspect_ratio=decrease,"
@@ -212,12 +226,18 @@ def render_vertical_with_audio(
     command = [
         "ffmpeg",
         "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-threads",
+        "1",
         "-i",
         str(video_path),
         "-i",
         str(narration_path),
     ]
 
+    # Burn subtitles into the video.
     if (
         subtitle_path
         and Path(subtitle_path).exists()
@@ -225,6 +245,7 @@ def render_vertical_with_audio(
 
         subtitle_file = (
             Path(subtitle_path)
+            .resolve()
             .as_posix()
             .replace(":", r"\:")
         )
@@ -246,26 +267,43 @@ def render_vertical_with_audio(
             vertical_filter,
         ])
 
+    # TikTok optimized encoding.
     command.extend([
         "-map",
         "0:v:0",
         "-map",
         "1:a:0",
         "-shortest",
+
+        # Fast + low-resource H.264 encoding
         "-c:v",
         "libx264",
         "-preset",
-        "veryfast",
+        "ultrafast",
         "-crf",
-        "23",
+        "28",
+
+        # TikTok compatible
+        "-pix_fmt",
+        "yuv420p",
+
+        # Audio
         "-c:a",
         "aac",
         "-b:a",
         "128k",
+
+        # Web/TikTok friendly MP4
         "-movflags",
         "+faststart",
+
         str(output_path),
     ])
+
+    print(
+        "[FINAL RENDER] TikTok 9:16 render started...",
+        flush=True,
+    )
 
     _run(command)
 
