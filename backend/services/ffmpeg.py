@@ -1,7 +1,6 @@
 import json
 import shutil
 import subprocess
-
 from pathlib import Path
 
 from backend.config import (
@@ -37,11 +36,8 @@ def _run(command):
 
 
 def get_duration(video_path):
-
     if not ffprobe_available():
-        raise RuntimeError(
-            "ffprobe is not installed"
-        )
+        raise RuntimeError("ffprobe is not installed")
 
     result = subprocess.run(
         [
@@ -61,20 +57,22 @@ def get_duration(video_path):
 
     data = json.loads(result.stdout)
 
-    return float(
-        data["format"]["duration"]
-    )
+    duration = data.get("format", {}).get("duration")
+
+    if duration is None:
+        raise RuntimeError(
+            f"Could not determine media duration: {video_path}"
+        )
+
+    return float(duration)
 
 
 def extract_audio(
     video_path,
     output_name,
 ):
-
     if not ffmpeg_available():
-        raise RuntimeError(
-            "FFmpeg is not installed"
-        )
+        raise RuntimeError("FFmpeg is not installed")
 
     TEMP_DIR.mkdir(
         parents=True,
@@ -91,8 +89,11 @@ def extract_audio(
         "error",
         "-threads",
         "1",
+
         "-i",
         str(video_path),
+
+        # Original video audio -> Whisper
         "-vn",
         "-ac",
         "1",
@@ -100,6 +101,7 @@ def extract_audio(
         "16000",
         "-c:a",
         "pcm_s16le",
+
         str(output_path),
     ])
 
@@ -113,6 +115,11 @@ def extract_audio(
             "Extracted audio is empty."
         )
 
+    print(
+        f"[AUDIO OK] {output_path}",
+        flush=True,
+    )
+
     return output_path
 
 
@@ -122,7 +129,6 @@ def cut_clip(
     duration,
     output_name,
 ):
-
     if not ffmpeg_available():
         raise RuntimeError(
             "FFmpeg is not installed"
@@ -151,22 +157,34 @@ def cut_clip(
         "-hide_banner",
         "-loglevel",
         "error",
+
         "-ss",
         str(start),
+
         "-i",
         str(video_path),
+
         "-t",
         str(duration),
+
+        # Intermediate clip only.
+        # Original audio can exist here because
+        # final render will NOT map it.
         "-map",
         "0:v:0",
+
         "-map",
         "0:a?",
+
         "-c",
         "copy",
+
         "-avoid_negative_ts",
         "make_zero",
+
         "-movflags",
         "+faststart",
+
         str(output_path),
     ])
 
@@ -194,10 +212,37 @@ def render_vertical_with_audio(
     subtitle_path,
     output_name,
 ):
+    """
+    Final SUN SPY RECAP renderer.
+
+    IMPORTANT:
+    - Original video audio is NEVER mapped.
+    - Only Burmese narration audio is mapped.
+    - Burmese SRT is burned into the video.
+    - Output is 720x1280 (9:16).
+    """
 
     if not ffmpeg_available():
         raise RuntimeError(
             "FFmpeg is not installed"
+        )
+
+    video_path = Path(video_path)
+    narration_path = Path(narration_path)
+
+    if not video_path.exists():
+        raise FileNotFoundError(
+            f"Video not found: {video_path}"
+        )
+
+    if not narration_path.exists():
+        raise FileNotFoundError(
+            f"Narration audio not found: {narration_path}"
+        )
+
+    if narration_path.stat().st_size < 1000:
+        raise RuntimeError(
+            "Narration audio file is empty."
         )
 
     OUTPUT_DIR.mkdir(
@@ -208,8 +253,7 @@ def render_vertical_with_audio(
     output_path = OUTPUT_DIR / output_name
 
     # ---------------------------------------
-    # FAST 9:16 RENDER
-    # Render Free instance အတွက် 720x1280
+    # 9:16 VIDEO
     # ---------------------------------------
 
     vertical_filter = (
@@ -220,6 +264,13 @@ def render_vertical_with_audio(
         "(oh-ih)/2:black"
     )
 
+    # ---------------------------------------
+    # INPUTS
+    #
+    # Input 0 = video
+    # Input 1 = Burmese narration
+    # ---------------------------------------
+
     command = [
         "ffmpeg",
         "-y",
@@ -227,61 +278,79 @@ def render_vertical_with_audio(
         "-loglevel",
         "error",
 
-        # Keep CPU usage predictable
         "-threads",
         "1",
 
-        # Input video
+        # Video input
         "-i",
         str(video_path),
 
-        # Burmese narration
+        # Narrator input
         "-i",
         str(narration_path),
     ]
 
     # ---------------------------------------
-    # SUBTITLE
+    # BURMESE SUBTITLE
     # ---------------------------------------
 
-    if (
+    subtitle_exists = (
         subtitle_path
         and Path(subtitle_path).exists()
-    ):
+        and Path(subtitle_path).stat().st_size > 0
+    )
 
+    if subtitle_exists:
         subtitle_file = (
             Path(subtitle_path)
             .resolve()
             .as_posix()
             .replace(":", r"\:")
+            .replace("'", r"\'")
         )
 
         video_filter = (
             f"{vertical_filter},"
-            f"subtitles={subtitle_file}"
+            f"subtitles='{subtitle_file}'"
+        )
+
+        print(
+            f"[SUBTITLE] Burmese SRT found: {subtitle_path}",
+            flush=True,
         )
 
     else:
-
         video_filter = vertical_filter
+
+        print(
+            "[SUBTITLE] No subtitle file found. "
+            "Rendering without subtitles.",
+            flush=True,
+        )
+
+    # ---------------------------------------
+    # STREAM MAPPING
+    # ---------------------------------------
 
     command.extend([
         "-vf",
         video_filter,
 
-        # Video
+        # ONLY video from original video
         "-map",
         "0:v:0",
 
-        # Narration
+        # ONLY narration from input 1
         "-map",
         "1:a:0",
 
-        # Stop when shortest stream ends
-        "-shortest",
+        # Ignore original video audio completely.
+        # This is the important part.
+        "-map_metadata",
+        "-1",
 
         # -----------------------------------
-        # FAST H.264
+        # VIDEO
         # -----------------------------------
 
         "-c:v",
@@ -297,7 +366,7 @@ def render_vertical_with_audio(
         "yuv420p",
 
         # -----------------------------------
-        # Audio
+        # AUDIO
         # -----------------------------------
 
         "-c:a",
@@ -305,6 +374,15 @@ def render_vertical_with_audio(
 
         "-b:a",
         "96k",
+
+        "-ac",
+        "2",
+
+        # -----------------------------------
+        # AUDIO/VISUAL SYNC
+        # -----------------------------------
+
+        "-shortest",
 
         # -----------------------------------
         # MP4
@@ -317,11 +395,16 @@ def render_vertical_with_audio(
     ])
 
     print(
-        "[FINAL RENDER] Fast TikTok 9:16 render started...",
+        "[FINAL RENDER] "
+        "9:16 + Burmese Narrator + Burmese Subtitle...",
         flush=True,
     )
 
     _run(command)
+
+    # ---------------------------------------
+    # VERIFY OUTPUT
+    # ---------------------------------------
 
     if not output_path.exists():
         raise RuntimeError(
@@ -333,8 +416,89 @@ def render_vertical_with_audio(
             "Final video is empty."
         )
 
+    # Verify final streams
+    try:
+        verify = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_streams",
+                str(output_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=True,
+        )
+
+        stream_data = json.loads(
+            verify.stdout
+        )
+
+        streams = stream_data.get(
+            "streams",
+            [],
+        )
+
+        video_streams = [
+            stream
+            for stream in streams
+            if stream.get("codec_type") == "video"
+        ]
+
+        audio_streams = [
+            stream
+            for stream in streams
+            if stream.get("codec_type") == "audio"
+        ]
+
+        if not video_streams:
+            raise RuntimeError(
+                "Final video has no video stream."
+            )
+
+        if not audio_streams:
+            raise RuntimeError(
+                "Final video has NO audio stream. "
+                "Narrator audio was not included."
+            )
+
+        print(
+            "[VERIFY] Final video stream: OK",
+            flush=True,
+        )
+
+        print(
+            "[VERIFY] Final narration audio: OK",
+            flush=True,
+        )
+
+        print(
+            f"[VERIFY] Audio streams: "
+            f"{len(audio_streams)}",
+            flush=True,
+        )
+
+    except RuntimeError:
+        raise
+
+    except Exception as error:
+        print(
+            f"[VERIFY] Stream check skipped: {error}",
+            flush=True,
+        )
+
     print(
         f"[FINAL VIDEO OK] {output_path}",
+        flush=True,
+    )
+
+    print(
+        f"[FINAL VIDEO SIZE] "
+        f"{output_path.stat().st_size} bytes",
         flush=True,
     )
 
