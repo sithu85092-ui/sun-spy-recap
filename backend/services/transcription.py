@@ -5,19 +5,26 @@ from faster_whisper import WhisperModel
 
 
 class TranscriptionEngine:
+    """
+    SUN SPY RECAP multilingual speech-to-text engine.
 
-    def __init__(self, model_size="tiny"):
+    Goals:
+    - Detect the original language automatically.
+    - Keep the original language transcript.
+    - Do NOT force Burmese on non-Burmese videos.
+    - Produce cleaner transcripts for Gemini recap generation.
+    """
+
+    def __init__(self, model_size="small"):
         self.model_size = model_size
         self.model = None
 
     def load_model(self):
-
         if self.model is None:
-
             start_time = time.time()
 
             print(
-                "[WHISPER] Loading model...",
+                f"[WHISPER] Loading model: {self.model_size}",
                 flush=True,
             )
 
@@ -32,8 +39,7 @@ class TranscriptionEngine:
             elapsed = time.time() - start_time
 
             print(
-                f"[WHISPER] Model loaded "
-                f"in {elapsed:.1f}s",
+                f"[WHISPER] Model loaded in {elapsed:.1f}s",
                 flush=True,
             )
 
@@ -45,7 +51,6 @@ class TranscriptionEngine:
         path,
         language=None,
     ):
-
         print(
             f"[WHISPER] Transcription language: "
             f"{language or 'AUTO'}",
@@ -55,17 +60,20 @@ class TranscriptionEngine:
         segments, info = model.transcribe(
             str(path),
 
-            beam_size=1,
+            # Better multilingual accuracy than beam_size=1.
+            beam_size=5,
 
-            best_of=1,
+            best_of=5,
 
             temperature=0,
 
             language=language,
 
+            # Helps remove long silent sections.
             vad_filter=True,
 
-            condition_on_previous_text=False,
+            # Keep context between nearby speech segments.
+            condition_on_previous_text=True,
 
             word_timestamps=False,
 
@@ -74,6 +82,9 @@ class TranscriptionEngine:
             log_prob_threshold=-1.0,
 
             no_speech_threshold=0.6,
+
+            # Prevent hallucinated text during silence.
+            hallucination_silence_threshold=2.0,
         )
 
         result_segments = []
@@ -82,26 +93,28 @@ class TranscriptionEngine:
         count = 0
 
         for segment in segments:
-
-            text = segment.text.strip()
+            text = str(segment.text or "").strip()
 
             if not text:
                 continue
 
             count += 1
 
-            result_segments.append({
-                "start": float(segment.start),
-                "end": float(segment.end),
-                "text": text,
-            })
+            result_segments.append(
+                {
+                    "start": float(segment.start),
+                    "end": float(segment.end),
+                    "text": text,
+                }
+            )
 
             texts.append(text)
 
             print(
                 f"[WHISPER] Segment {count}: "
                 f"{segment.start:.1f}s - "
-                f"{segment.end:.1f}s",
+                f"{segment.end:.1f}s | "
+                f"{text[:160]}",
                 flush=True,
             )
 
@@ -133,7 +146,6 @@ class TranscriptionEngine:
         }
 
     def _looks_burmese(self, text):
-
         text = str(text or "")
 
         if not text:
@@ -161,11 +173,44 @@ class TranscriptionEngine:
             and ratio >= 0.25
         )
 
-    def transcribe(
-        self,
-        audio_path,
-    ):
+    def _looks_very_poor(self, result):
+        """
+        Detect obviously bad Whisper output.
 
+        We do not automatically translate it.
+        We only use this to decide whether another
+        transcription pass may be useful.
+        """
+
+        text = str(
+            result.get("text", "")
+        ).strip()
+
+        if len(text) < 10:
+            return True
+
+        segments = result.get(
+            "segments",
+            [],
+        )
+
+        if not segments:
+            return True
+
+        probability = float(
+            result.get(
+                "language_probability",
+                0.0,
+            )
+        )
+
+        # Very low language confidence.
+        if probability < 0.35:
+            return True
+
+        return False
+
+    def transcribe(self, audio_path):
         path = Path(audio_path)
 
         if not path.exists():
@@ -197,8 +242,8 @@ class TranscriptionEngine:
         )
 
         # --------------------------------------------------
-        # STEP 1
-        # Normal automatic transcription
+        # PASS 1
+        # Automatic multilingual transcription
         # --------------------------------------------------
 
         result = self._run_transcription(
@@ -208,8 +253,9 @@ class TranscriptionEngine:
         )
 
         detected_language = result["language"]
-        probability = result["language_probability"]
-        transcript = result["text"]
+        probability = result[
+            "language_probability"
+        ]
 
         print(
             f"[WHISPER] Auto detected language: "
@@ -224,93 +270,70 @@ class TranscriptionEngine:
         )
 
         # --------------------------------------------------
-        # STEP 2
-        # Detect possible Burmese misclassification
+        # IMPORTANT:
+        # Never force Burmese transcription for Chinese,
+        # Japanese, Korean, etc.
         #
-        # If Whisper says Chinese/Japanese/etc. with weak
-        # confidence, retry using Burmese.
+        # The old implementation could retry with
+        # language='my' when Whisper detected certain
+        # languages. That can damage multilingual
+        # transcripts.
         # --------------------------------------------------
 
-        retry_burmese = False
-
-        suspicious_languages = {
-            "zh",
-            "ja",
-            "ko",
-            "th",
-            "vi",
-            "lo",
-            "km",
-            "unknown",
-        }
-
-        if detected_language in suspicious_languages:
-
-            retry_burmese = True
-
-        elif probability < 0.70:
-
-            retry_burmese = True
-
-        if retry_burmese:
-
+        if self._looks_very_poor(result):
             print(
-                "[WHISPER] Possible language "
-                "misclassification detected.",
+                "[WHISPER] Transcript confidence is low.",
                 flush=True,
             )
 
             print(
-                "[WHISPER] Retrying transcription "
-                "with Burmese language='my'...",
+                "[WHISPER] Running one accuracy retry...",
                 flush=True,
             )
 
-            burmese_result = self._run_transcription(
+            retry_result = self._run_transcription(
                 model,
                 path,
-                language="my",
+                language=(
+                    detected_language
+                    if detected_language
+                    and detected_language != "unknown"
+                    else None
+                ),
             )
 
-            burmese_text = burmese_result["text"]
+            retry_text = str(
+                retry_result.get("text", "")
+            ).strip()
 
-            # --------------------------------------------------
-            # Choose Burmese result only when it actually
-            # contains Burmese script.
-            # Otherwise keep the original auto-detected
-            # transcription for multilingual support.
-            # --------------------------------------------------
+            original_text = str(
+                result.get("text", "")
+            ).strip()
 
-            if self._looks_burmese(
-                burmese_text
+            # Use retry only when it is clearly better.
+            if (
+                len(retry_text) > len(original_text)
+                and not self._looks_very_poor(
+                    retry_result
+                )
             ):
-
                 print(
-                    "[WHISPER] Burmese transcript "
-                    "confirmed.",
+                    "[WHISPER] Accuracy retry selected.",
                     flush=True,
                 )
 
-                result = burmese_result
+                result = retry_result
 
             else:
-
                 print(
-                    "[WHISPER] Burmese retry did not "
-                    "produce reliable Burmese text.",
-                    flush=True,
-                )
-
-                print(
-                    "[WHISPER] Keeping automatic "
-                    "transcription.",
+                    "[WHISPER] Keeping original "
+                    "automatic transcript.",
                     flush=True,
                 )
 
         elapsed = time.time() - start_time
 
         if not result["text"]:
-
             print(
                 "[WHISPER] No speech detected.",
                 flush=True,
@@ -318,26 +341,17 @@ class TranscriptionEngine:
 
             return {
                 "success": False,
-
                 "language": result["language"],
-
                 "language_probability": (
                     result[
                         "language_probability"
                     ]
                 ),
-
                 "text": "",
-
                 "segments": [],
-
                 "engine": "faster-whisper",
-
                 "model": self.model_size,
-
-                "error": (
-                    "No speech was detected."
-                ),
+                "error": "No speech was detected.",
             }
 
         print(
@@ -365,32 +379,37 @@ class TranscriptionEngine:
         )
 
         print(
-            f"[WHISPER] Transcript: "
-            f"{result['text'][:500]}",
+            "[WHISPER] Transcript preview:",
+            flush=True,
+        )
+
+        print(
+            result["text"][:1200],
             flush=True,
         )
 
         return {
             "success": True,
-
             "language": result["language"],
-
             "language_probability": (
                 result[
                     "language_probability"
                 ]
             ),
-
             "text": result["text"],
-
             "segments": result["segments"],
-
             "engine": "faster-whisper",
-
             "model": self.model_size,
         }
 
 
-transcription_engine = (
-    TranscriptionEngine("tiny")
+# Global transcription engine.
+#
+# "small" gives noticeably better multilingual
+# transcription than "tiny", especially for
+# Chinese/Japanese/other non-Burmese speech.
+#
+# If Render RAM is insufficient, change this to "tiny".
+transcription_engine = TranscriptionEngine(
+    "small"
 )
