@@ -1,58 +1,5 @@
 import re
-import subprocess
-
 from pathlib import Path
-
-
-def detect_scenes(
-    video_path,
-):
-
-    path = Path(video_path)
-
-    result = subprocess.run(
-        [
-            "ffmpeg",
-            "-i",
-            str(path),
-            "-vf",
-            "select='gt(scene,0.30)',showinfo",
-            "-an",
-            "-f",
-            "null",
-            "-",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
-    timestamps = []
-
-    for line in result.stderr.splitlines():
-
-        if "pts_time:" not in line:
-            continue
-
-        try:
-
-            value = (
-                line
-                .split("pts_time:")[1]
-                .split()[0]
-            )
-
-            timestamps.append({
-                "time": float(value)
-            })
-
-        except (
-            ValueError,
-            IndexError,
-        ):
-            continue
-
-    return timestamps
 
 
 def choose_highlight(
@@ -60,93 +7,91 @@ def choose_highlight(
     clip_duration=30.0,
     transcript_segments=None,
 ):
+    """
+    Fast highlight selection for Render Free.
+    Avoids running full-video FFmpeg scene detection.
+    """
 
     path = Path(video_path)
 
     if not path.exists():
-
         raise FileNotFoundError(
             f"Video not found: {path}"
         )
 
-    scenes = detect_scenes(
-        path
-    )
+    duration = float(clip_duration)
 
+    # Prefer transcript segments containing interesting keywords.
     if transcript_segments:
 
         keywords = re.compile(
             r"("
             r"important|finally|secret|best|"
-            r"amazing|surprise|"
-            r"အရေးကြီး|နောက်ဆုံး|"
-            r"လျှို့ဝှက်|အံ့သြ|"
-            r"အကောင်းဆုံး"
+            r"amazing|surprise|interesting|"
+            r"အရေးကြီး|နောက်ဆုံး|လျှို့ဝှက်|"
+            r"အံ့သြ|အကောင်းဆုံး|စိတ်ဝင်စား"
             r")",
             re.I,
         )
 
         for segment in transcript_segments:
 
-            if keywords.search(
-                segment.get(
-                    "text",
-                    "",
-                )
-            ):
+            text = segment.get(
+                "text",
+                "",
+            )
+
+            if keywords.search(text):
 
                 start = max(
                     0.0,
                     float(
-                        segment["start"]
-                    ) - 5.0,
+                        segment.get(
+                            "start",
+                            0.0,
+                        )
+                    ) - 3.0,
                 )
 
                 return {
                     "start": start,
-                    "duration": clip_duration,
+                    "duration": duration,
                     "score": 0.9,
-                    "reason": (
-                        "Transcript "
-                        "emphasis match"
-                    ),
+                    "reason": "Transcript emphasis match",
                 }
 
-    if scenes:
+    # If no keyword is found, use the first meaningful
+    # transcript segment instead of scanning the whole video.
+    if transcript_segments:
 
-        middle_index = (
-            len(scenes) // 2
-        )
-
-        candidate = scenes[
+        segment = transcript_segments[
             min(
-                len(scenes) - 1,
-                middle_index,
+                len(transcript_segments) - 1,
+                len(transcript_segments) // 2,
             )
         ]
 
         start = max(
             0.0,
-            candidate["time"]
-            - clip_duration / 2,
+            float(
+                segment.get(
+                    "start",
+                    0.0,
+                )
+            ) - 3.0,
         )
 
         return {
             "start": start,
-            "duration": clip_duration,
-            "score": 0.6,
-            "reason": (
-                "Scene-change "
-                "highlight"
-            ),
+            "duration": duration,
+            "score": 0.5,
+            "reason": "Transcript midpoint highlight",
         }
 
+    # Final fallback.
     return {
         "start": 0.0,
-        "duration": clip_duration,
+        "duration": duration,
         "score": 0.2,
-        "reason": (
-            "Fallback beginning "
-            "of video"
-        ),
+        "reason": "Beginning of video fallback",
     }
